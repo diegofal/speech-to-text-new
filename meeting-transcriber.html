@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meeting Transcriber</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f5f5f5;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    header {
+      background-color: #2196F3;
+      color: white;
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    h1 {
+      margin: 0;
+      font-size: 24px;
+    }
+    .status-container {
+      text-align: center;
+      margin-bottom: 16px;
+    }
+    .status-text {
+      font-size: 16px;
+      color: #333;
+    }
+    .error-text {
+      color: #f44336;
+      margin-top: 8px;
+    }
+    .button-container {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 24px;
+    }
+    button {
+      padding: 12px 24px;
+      font-size: 16px;
+      background-color: #2196F3;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    button:hover {
+      background-color: #0b7dda;
+    }
+    button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+    .button-delete {
+      background-color: #f44336;
+      margin-left: 8px;
+    }
+    .button-delete:hover {
+      background-color: #d32f2f;
+    }
+    .live-container {
+      background-color: #e3f2fd;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 24px;
+    }
+    .live-title {
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+    .live-text {
+      font-style: italic;
+    }
+    .divider {
+      height: 1px;
+      background-color: #ddd;
+      margin: 24px 0;
+    }
+    .section-title {
+      font-size: 18px;
+      font-weight: bold;
+      margin-bottom: 16px;
+    }
+    .transcript-container {
+      margin-bottom: 16px;
+    }
+    .transcript-item {
+      background-color: white;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    .transcript-date {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 8px;
+    }
+    .transcript-text {
+      font-size: 16px;
+      line-height: 1.5;
+    }
+    .unsupported {
+      text-align: center;
+      color: #f44336;
+      padding: 20px;
+      background-color: #ffebee;
+      border-radius: 8px;
+      margin-top: 20px;
+    }
+    @media (max-width: 600px) {
+      body {
+        padding: 12px;
+      }
+      .transcript-item {
+        padding: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Meeting Transcriber</h1>
+    <div>
+      <button id="clearButton" class="button-delete" style="display: none">Clear All</button>
+    </div>
+  </header>
+
+  <div class="status-container">
+    <div id="statusText" class="status-text">Not listening</div>
+    <div id="errorText" class="error-text"></div>
+  </div>
+
+  <div class="button-container">
+    <button id="startButton">Start Transcribing</button>
+  </div>
+
+  <div id="liveContainer" class="live-container" style="display: none;">
+    <div class="live-title">Current:</div>
+    <div id="liveText" class="live-text"></div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div id="sectionTitle" class="section-title">No saved transcripts yet</div>
+
+  <div id="transcriptContainer" class="transcript-container"></div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      // Check if speech recognition is supported
+      if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        document.body.innerHTML = `
+          <header>
+            <h1>Meeting Transcriber</h1>
+          </header>
+          <div class="unsupported">
+            <h2>Speech Recognition Not Supported</h2>
+            <p>Your browser does not support the Web Speech API.</p>
+            <p>Please try using Google Chrome, Microsoft Edge, or another modern browser.</p>
+          </div>
+        `;
+        return;
+      }
+
+      // Elements
+      const startButton = document.getElementById('startButton');
+      const clearButton = document.getElementById('clearButton');
+      const statusText = document.getElementById('statusText');
+      const errorText = document.getElementById('errorText');
+      const liveContainer = document.getElementById('liveContainer');
+      const liveText = document.getElementById('liveText');
+      const sectionTitle = document.getElementById('sectionTitle');
+      const transcriptContainer = document.getElementById('transcriptContainer');
+
+      // Speech recognition
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      // State
+      let isListening = false;
+      let transcripts = [];
+
+      // Load saved transcripts
+      loadTranscripts();
+
+      // Event listeners
+      startButton.addEventListener('click', toggleRecognition);
+      clearButton.addEventListener('click', clearTranscripts);
+
+      // Speech recognition events
+      recognition.onstart = function() {
+        isListening = true;
+        startButton.textContent = 'Stop Transcribing';
+        startButton.classList.add('button-delete');
+        statusText.textContent = 'Listening...';
+        errorText.textContent = '';
+      };
+
+      recognition.onerror = function(event) {
+        errorText.textContent = 'Error: ' + event.error;
+        console.error('Speech recognition error:', event.error);
+      };
+
+      recognition.onend = function() {
+        isListening = false;
+        startButton.textContent = 'Start Transcribing';
+        startButton.classList.remove('button-delete');
+        statusText.textContent = 'Not listening';
+        liveContainer.style.display = 'none';
+      };
+
+      recognition.onresult = function(event) {
+        let interimTranscript = '';
+        let finalTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript;
+          } else {
+            interimTranscript += transcript;
+          }
+        }
+
+        // Show interim results
+        if (interimTranscript) {
+          liveContainer.style.display = 'block';
+          liveText.textContent = interimTranscript;
+        }
+
+        // Save final results
+        if (finalTranscript) {
+          saveTranscript(finalTranscript);
+          liveText.textContent = '';
+        }
+      };
+
+      function toggleRecognition() {
+        if (isListening) {
+          recognition.stop();
+        } else {
+          recognition.start();
+        }
+      }
+
+      function saveTranscript(text) {
+        const timestamp = new Date().toISOString();
+        const newTranscript = {
+          id: timestamp,
+          text: text.trim(),
+          date: timestamp
+        };
+
+        transcripts.unshift(newTranscript); // Add to beginning of array
+        localStorage.setItem('meetingTranscripts', JSON.stringify(transcripts));
+        updateTranscriptUI();
+      }
+
+      function loadTranscripts() {
+        try {
+          const savedTranscripts = localStorage.getItem('meetingTranscripts');
+          if (savedTranscripts) {
+            transcripts = JSON.parse(savedTranscripts);
+            updateTranscriptUI();
+          }
+        } catch (e) {
+          console.error('Failed to load transcripts:', e);
+          errorText.textContent = 'Error loading saved transcripts';
+        }
+      }
+
+      function clearTranscripts() {
+        if (confirm('Are you sure you want to delete all transcripts?')) {
+          transcripts = [];
+          localStorage.removeItem('meetingTranscripts');
+          updateTranscriptUI();
+        }
+      }
+
+      function updateTranscriptUI() {
+        if (transcripts.length > 0) {
+          clearButton.style.display = 'inline-block';
+          sectionTitle.textContent = 'Saved Transcripts:';
+          
+          transcriptContainer.innerHTML = '';
+          transcripts.forEach(item => {
+            const transcriptItem = document.createElement('div');
+            transcriptItem.className = 'transcript-item';
+            
+            const transcriptDate = document.createElement('div');
+            transcriptDate.className = 'transcript-date';
+            transcriptDate.textContent = new Date(item.date).toLocaleString();
+            
+            const transcriptText = document.createElement('div');
+            transcriptText.className = 'transcript-text';
+            transcriptText.textContent = item.text;
+            
+            transcriptItem.appendChild(transcriptDate);
+            transcriptItem.appendChild(transcriptText);
+            transcriptContainer.appendChild(transcriptItem);
+          });
+        } else {
+          clearButton.style.display = 'none';
+          sectionTitle.textContent = 'No saved transcripts yet';
+          transcriptContainer.innerHTML = '';
+        }
+      }
+    });
+  </script>
+</body>
+</html>
