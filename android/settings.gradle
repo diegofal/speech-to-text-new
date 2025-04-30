@@ -1,0 +1,13 @@
+rootProject.name = 'meeting-transcriber'
+
+apply from: new File([rootDir.parentFile.parentFile.absolutePath, 'node_modules', 'react-native', 'react.gradle'].join(File.separator))
+apply from: "../node_modules/@react-native-community/cli-platform-android/native_modules.gradle"
+includeModules([nodeModulesPath: "../node_modules"])
+
+include ':app'
+include ':react-native-voice'
+project(':react-native-voice').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-voice/android')
+include ':react-native-permissions'
+project(':react-native-permissions').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-permissions/android')
+include ':react-native-async-storage'
+project(':react-native-async-storage').projectDir = new File(rootProject.projectDir, '../node_modules/@react-native-async-storage/async-storage/android')

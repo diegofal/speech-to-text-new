@@ -9,7 +9,7 @@ const TranscriptionButton = ({ isListening, onStartListening, onStopListening })
         mode="contained"
         icon={isListening ? 'stop' : 'microphone'}
         onPress={isListening ? onStopListening : onStartListening}
-        style={styles.button}
+        style={[styles.button, isListening ? styles.stopButton : styles.startButton]}
         labelStyle={styles.buttonLabel}
       >
         {isListening ? 'Stop' : 'Start'} Transcribing
@@ -28,9 +28,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 8,
   },
+  startButton: {
+    backgroundColor: '#2196F3',
+  },
+  stopButton: {
+    backgroundColor: '#F44336',
+  },
   buttonLabel: {
     fontSize: 16,
     fontWeight: '600',
+    color: 'white',
   },
 });
 

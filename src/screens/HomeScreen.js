@@ -6,158 +6,61 @@ import TranscriptionButton from '../components/TranscriptionButton';
 import LiveTranscription from '../components/LiveTranscription';
 import TranscriptionList from '../components/TranscriptionList';
 
-// Web Speech API fallback for when dependencies aren't available
-const useBrowserSpeechRecognition = () => {
-  const [isListening, setIsListening] = useState(false);
-  const [transcript, setTranscript] = useState('');
-  const [partialTranscript, setPartialTranscript] = useState('');
-  const [error, setError] = useState('');
-
-  let recognition = null;
-
-  const startListening = () => {
-    if (Platform.OS !== 'web') {
-      setError('Browser speech recognition is only available on web');
-      return;
-    }
-
-    try {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (!SpeechRecognition) {
-        setError('Speech recognition not supported in this browser');
-        return;
-      }
-
-      recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-
-      recognition.onstart = () => {
-        setIsListening(true);
-        setError('');
-      };
-
-      recognition.onresult = (event) => {
-        let interimTranscript = '';
-        let finalTranscript = '';
-
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const transcript = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            finalTranscript += transcript;
-          } else {
-            interimTranscript += transcript;
-          }
-        }
-
-        if (interimTranscript) {
-          setPartialTranscript(interimTranscript);
-        }
-
-        if (finalTranscript) {
-          setTranscript(prev => prev + ' ' + finalTranscript);
-          setPartialTranscript('');
-        }
-      };
-
-      recognition.onerror = (event) => {
-        setError(`Error: ${event.error}`);
-        setIsListening(false);
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-      };
-
-      recognition.start();
-    } catch (err) {
-      setError(`Failed to start speech recognition: ${err.message}`);
-    }
-  };
-
-  const stopListening = () => {
-    if (recognition) {
-      recognition.stop();
-      setIsListening(false);
-    }
-  };
-
-  return {
-    isListening,
-    transcript,
-    partialTranscript,
-    error,
-    startListening,
-    stopListening
-  };
-};
+// Import custom hook for voice recognition
+import useVoiceRecognition from '../utils/useVoiceRecognition';
 
 const HomeScreen = () => {
   // State variables
   const [transcripts, setTranscripts] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [usingFallback, setUsingFallback] = useState(false);
+  const [loading, setLoading] = useState(true);
   
-  // Try to use the browser speech recognition fallback if we're on web
+  // Use our custom voice recognition hook
   const {
     isListening,
     transcript,
     partialTranscript,
     error,
     startListening,
-    stopListening
-  } = useBrowserSpeechRecognition();
+    stopListening,
+    saveTranscript,
+    loadTranscripts,
+    clearTranscripts
+  } = useVoiceRecognition();
   
   // Effect to save the transcript when it changes and is not empty
   useEffect(() => {
     if (transcript && transcript.trim() !== '') {
-      saveTranscript(transcript);
+      saveTranscript(transcript).then(newTranscript => {
+        if (newTranscript) {
+          setTranscripts(prev => [...prev, newTranscript]);
+        }
+      });
     }
   }, [transcript]);
 
-  // Simple save function without external dependencies
-  const saveTranscript = (text) => {
-    const timestamp = new Date().toISOString();
-    const newTranscript = {
-      id: timestamp,
-      text: text.trim(),
-      date: timestamp
-    };
-    
-    setTranscripts(prev => [...prev, newTranscript]);
-    
-    // Try to use localStorage on web
-    if (Platform.OS === 'web' && window.localStorage) {
-      try {
-        const savedTranscripts = JSON.parse(localStorage.getItem('transcripts') || '[]');
-        savedTranscripts.push(newTranscript);
-        localStorage.setItem('transcripts', JSON.stringify(savedTranscripts));
-      } catch (e) {
-        console.error('Failed to save to localStorage:', e);
-      }
-    }
-  };
-
-  // Clear all transcripts
-  const clearTranscripts = () => {
-    setTranscripts([]);
-    if (Platform.OS === 'web' && window.localStorage) {
-      localStorage.removeItem('transcripts');
-    }
-  };
-
-  // Load saved transcripts if available (web only)
+  // Load saved transcripts if available 
   useEffect(() => {
-    if (Platform.OS === 'web' && window.localStorage) {
+    const fetchTranscripts = async () => {
       try {
-        const savedTranscripts = JSON.parse(localStorage.getItem('transcripts') || '[]');
+        const savedTranscripts = await loadTranscripts();
         setTranscripts(savedTranscripts);
       } catch (e) {
-        console.error('Failed to load from localStorage:', e);
+        console.error('Failed to load transcripts:', e);
+      } finally {
+        setLoading(false);
       }
-    }
-    setLoading(false);
+    };
+
+    fetchTranscripts();
   }, []);
+
+  // Handler for clearing all transcripts
+  const handleClearTranscripts = async () => {
+    const success = await clearTranscripts();
+    if (success) {
+      setTranscripts([]);
+    }
+  };
 
   if (loading) {
     return (
@@ -172,7 +75,7 @@ const HomeScreen = () => {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Meeting Transcriber</Text>
         {transcripts.length > 0 && (
-          <Button title="Clear All" onPress={clearTranscripts} />
+          <Button title="Clear All" onPress={handleClearTranscripts} />
         )}
       </View>
 
