@@ -12,6 +12,8 @@ import android.speech.SpeechRecognizer
 import android.util.Log
 import android.view.View
 import android.widget.Button
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -28,10 +30,17 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     private lateinit var stopButton: Button
     private lateinit var resultTextView: TextView
     private lateinit var partialResultTextView: TextView
+    private lateinit var languageRadioGroup: RadioGroup
+    private lateinit var radioEnglish: RadioButton
+    private lateinit var radioSpanish: RadioButton
+    
     private var isListening = false
     private var continuousListening = true
     private var allResults = StringBuilder()
     private val handler = Handler(Looper.getMainLooper())
+    
+    // Language settings
+    private var selectedLanguage = "en-US" // Default to English
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,10 +50,27 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         stopButton = findViewById(R.id.stopButton)
         resultTextView = findViewById(R.id.resultTextView)
         partialResultTextView = findViewById(R.id.partialResultTextView)
+        languageRadioGroup = findViewById(R.id.languageRadioGroup)
+        radioEnglish = findViewById(R.id.radioEnglish)
+        radioSpanish = findViewById(R.id.radioSpanish)
 
         // Initialize speech recognizer
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
         speechRecognizer.setRecognitionListener(this)
+
+        // Set up language selection listener
+        languageRadioGroup.setOnCheckedChangeListener { _, checkedId ->
+            when (checkedId) {
+                R.id.radioEnglish -> {
+                    selectedLanguage = "en-US"
+                    updateLabelsForLanguage(isEnglish = true)
+                }
+                R.id.radioSpanish -> {
+                    selectedLanguage = "es-ES"
+                    updateLabelsForLanguage(isEnglish = false)
+                }
+            }
+        }
 
         startButton.setOnClickListener {
             checkPermissionAndStartListening()
@@ -56,6 +82,21 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         }
 
         updateButtonState()
+        updateLabelsForLanguage(radioEnglish.isChecked)
+    }
+    
+    private fun updateLabelsForLanguage(isEnglish: Boolean) {
+        if (isEnglish) {
+            startButton.text = "Start Listening"
+            stopButton.text = "Stop Listening"
+            findViewById<TextView>(R.id.partialLabelTextView).text = "Listening:"
+            findViewById<TextView>(R.id.resultLabelTextView).text = "Final Result:"
+        } else {
+            startButton.text = "Comenzar a Escuchar"
+            stopButton.text = "Dejar de Escuchar"
+            findViewById<TextView>(R.id.partialLabelTextView).text = "Escuchando:"
+            findViewById<TextView>(R.id.resultLabelTextView).text = "Resultado Final:"
+        }
     }
 
     private fun checkPermissionAndStartListening() {
@@ -81,10 +122,15 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+            
+            // Set language based on selection
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, selectedLanguage)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, selectedLanguage)
+            putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, true)
+            
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             
-            // Enable dictation mode for continuous speech recognition
+            // Set continuous mode for Android 11+ devices (API 30+)
             putExtra("android.speech.extra.DICTATION_MODE", true)
             
             // Set longer timeout for dictation sessions
@@ -103,7 +149,12 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             updateButtonState()
         } catch (e: Exception) {
             Log.e(TAG, "Error starting speech recognition: ${e.message}")
-            Toast.makeText(this, "Error starting speech recognition", Toast.LENGTH_SHORT).show()
+            val errorMessage = if (selectedLanguage == "es-ES") {
+                "Error al iniciar el reconocimiento de voz"
+            } else {
+                "Error starting speech recognition"
+            }
+            Toast.makeText(this, errorMessage, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -144,7 +195,12 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 startListening()
             } else {
-                Toast.makeText(this, "Permission denied for speech recognition", Toast.LENGTH_SHORT).show()
+                val message = if (selectedLanguage == "es-ES") {
+                    "Permiso denegado para el reconocimiento de voz"
+                } else {
+                    "Permission denied for speech recognition"
+                }
+                Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -187,7 +243,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     }
 
     override fun onError(error: Int) {
-        val errorMessage = when (error) {
+        val errorMessageKey = when (error) {
             SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
             SpeechRecognizer.ERROR_CLIENT -> "Client side error"
             SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Insufficient permissions"
@@ -199,6 +255,24 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech input"
             else -> "Unknown error"
         }
+        
+        val errorMessage = if (selectedLanguage == "es-ES") {
+            when (errorMessageKey) {
+                "Audio recording error" -> "Error de grabación de audio"
+                "Client side error" -> "Error del cliente"
+                "Insufficient permissions" -> "Permisos insuficientes"
+                "Network error" -> "Error de red"
+                "Network timeout" -> "Tiempo de espera de red agotado"
+                "No recognition result matched" -> "No se encontraron resultados"
+                "Recognition service busy" -> "Servicio de reconocimiento ocupado"
+                "Server error" -> "Error del servidor"
+                "No speech input" -> "No se detectó voz"
+                else -> "Error desconocido"
+            }
+        } else {
+            errorMessageKey
+        }
+        
         Log.e(TAG, "onError: $errorMessage (code: $error)")
         
         // Some errors are normal in continuous mode and should be handled by restarting
