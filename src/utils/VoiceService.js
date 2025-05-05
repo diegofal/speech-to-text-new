@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import Voice from 'react-native-voice';
+import NativeSpeechRecognition from './NativeSpeechRecognition';
 
 class VoiceService {
   constructor() {
@@ -22,15 +23,32 @@ class VoiceService {
 
     if (this.isInitialized) return;
 
-    Voice.onSpeechStart = this._onSpeechStart;
-    Voice.onSpeechRecognized = this._onSpeechRecognized;
-    Voice.onSpeechEnd = this._onSpeechEnd;
-    Voice.onSpeechError = this._onSpeechError;
-    Voice.onSpeechResults = this._onSpeechResults;
-    Voice.onSpeechPartialResults = this._onSpeechPartialResults;
-    Voice.onSpeechVolumeChanged = this._onSpeechVolumeChanged;
-    
-    this.isInitialized = true;
+    if (Platform.OS === 'android') {
+      // Use our native Android speech recognition module
+      NativeSpeechRecognition.initialize().then(initialized => {
+        if (initialized) {
+          // Set up event listeners for the native module
+          NativeSpeechRecognition.addListener('onSpeechStart', this._onSpeechStart);
+          NativeSpeechRecognition.addListener('onSpeechRecognized', this._onSpeechRecognized);
+          NativeSpeechRecognition.addListener('onSpeechEnd', this._onSpeechEnd);
+          NativeSpeechRecognition.addListener('onSpeechError', this._onSpeechError);
+          NativeSpeechRecognition.addListener('onSpeechResults', this._onSpeechResults);
+          NativeSpeechRecognition.addListener('onSpeechPartialResults', this._onSpeechPartialResults);
+          NativeSpeechRecognition.addListener('onSpeechVolumeChanged', this._onSpeechVolumeChanged);
+          this.isInitialized = true;
+        }
+      });
+    } else {
+      // Use react-native-voice for iOS
+      Voice.onSpeechStart = this._onSpeechStart;
+      Voice.onSpeechRecognized = this._onSpeechRecognized;
+      Voice.onSpeechEnd = this._onSpeechEnd;
+      Voice.onSpeechError = this._onSpeechError;
+      Voice.onSpeechResults = this._onSpeechResults;
+      Voice.onSpeechPartialResults = this._onSpeechPartialResults;
+      Voice.onSpeechVolumeChanged = this._onSpeechVolumeChanged;
+      this.isInitialized = true;
+    }
   }
 
   destroy() {
@@ -38,7 +56,11 @@ class VoiceService {
 
     if (!this.isInitialized) return;
 
-    Voice.destroy().then(Voice.removeAllListeners);
+    if (Platform.OS === 'android') {
+      NativeSpeechRecognition.destroy();
+    } else {
+      Voice.destroy().then(Voice.removeAllListeners);
+    }
     this.isInitialized = false;
   }
 
@@ -50,91 +72,86 @@ class VoiceService {
     this.listeners[event].push(callback);
   }
 
-  // Remove listeners
+  // Remove listener
   removeListener(event, callback) {
     if (!this.listeners[event]) return;
-    this.listeners[event] = this.listeners[event].filter(cb => cb !== callback);
+
+    const index = this.listeners[event].indexOf(callback);
+    if (index !== -1) {
+      this.listeners[event].splice(index, 1);
+    }
   }
 
-  // Trigger callbacks for a specific event
-  _triggerEvent(event, data) {
-    if (!this.listeners[event]) return;
-    this.listeners[event].forEach(callback => callback(data));
+  // Start speech recognition
+  async start(locale = 'en-US') {
+    if (Platform.OS === 'web') {
+      throw new Error('Speech recognition is not supported on web platform');
+    }
+
+    if (!this.isInitialized) {
+      this.initialize();
+    }
+
+    if (Platform.OS === 'android') {
+      return await NativeSpeechRecognition.start(locale);
+    } else {
+      return await Voice.start(locale);
+    }
   }
 
-  // Voice event handlers
+  // Stop speech recognition
+  async stop() {
+    if (Platform.OS === 'web') return;
+
+    if (!this.isInitialized) return;
+
+    if (Platform.OS === 'android') {
+      return await NativeSpeechRecognition.stop();
+    } else {
+      return await Voice.stop();
+    }
+  }
+
+  // Event handlers
   _onSpeechStart(e) {
-    this._triggerEvent('onSpeechStart', e);
+    this._notifyListeners('onSpeechStart', e);
   }
 
   _onSpeechRecognized(e) {
-    this._triggerEvent('onSpeechRecognized', e);
+    this._notifyListeners('onSpeechRecognized', e);
   }
 
   _onSpeechEnd(e) {
-    this._triggerEvent('onSpeechEnd', e);
+    this._notifyListeners('onSpeechEnd', e);
   }
 
   _onSpeechError(e) {
-    this._triggerEvent('onSpeechError', e);
+    this._notifyListeners('onSpeechError', e);
   }
 
   _onSpeechResults(e) {
-    this._triggerEvent('onSpeechResults', e);
+    this._notifyListeners('onSpeechResults', e);
   }
 
   _onSpeechPartialResults(e) {
-    this._triggerEvent('onSpeechPartialResults', e);
+    this._notifyListeners('onSpeechPartialResults', e);
   }
 
   _onSpeechVolumeChanged(e) {
-    this._triggerEvent('onSpeechVolumeChanged', e);
+    this._notifyListeners('onSpeechVolumeChanged', e);
   }
 
-  // Start voice recognition
-  async start(locale = 'en-US') {
-    if (Platform.OS === 'web') {
-      console.error('Cannot use native voice recognition on web');
-      throw new Error('Not supported on web');
-    }
+  _notifyListeners(event, data) {
+    if (!this.listeners[event]) return;
 
-    try {
-      if (!this.isInitialized) {
-        this.initialize();
+    this.listeners[event].forEach(callback => {
+      try {
+        callback(data);
+      } catch (error) {
+        console.error(`Error in ${event} listener:`, error);
       }
-      return await Voice.start(locale);
-    } catch (e) {
-      console.error('Error starting voice recognition:', e);
-      throw e;
-    }
-  }
-
-  // Stop voice recognition
-  async stop() {
-    if (Platform.OS === 'web') {
-      return;
-    }
-
-    try {
-      return await Voice.stop();
-    } catch (e) {
-      console.error('Error stopping voice recognition:', e);
-      throw e;
-    }
-  }
-
-  // Check if voice recognition is available
-  async isAvailable() {
-    if (Platform.OS === 'web') {
-      return false;
-    }
-
-    // Voice library doesn't have a direct method to check availability
-    // We can assume it's available if it initializes correctly
-    return this.isInitialized;
+    });
   }
 }
 
-// Singleton instance
-const voiceService = new VoiceService();
-export default voiceService;
+export default new VoiceService();

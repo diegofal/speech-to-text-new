@@ -1,11 +1,16 @@
 import React from 'react';
-import { SafeAreaView, StyleSheet } from 'react-native';
+import { Platform, SafeAreaView, StyleSheet } from 'react-native';
 import HomeScreen from './src/screens/HomeScreen';
+import AndroidSpeechRecognition from './src/components/AndroidSpeechRecognition';
 
 const App = () => {
   return (
     <SafeAreaView style={styles.container}>
-      <HomeScreen />
+      {Platform.OS === 'android' ? (
+        <AndroidSpeechRecognition />
+      ) : (
+        <HomeScreen />
+      )}
     </SafeAreaView>
   );
 };
@@ -13,7 +18,7 @@ const App = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#F5FCFF',
   },
 });
 
