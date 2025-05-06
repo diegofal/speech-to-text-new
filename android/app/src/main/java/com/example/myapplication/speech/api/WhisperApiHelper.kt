@@ -25,13 +25,8 @@ class WhisperApiHelper(private val context: Context) {
     }
     
     init {
-        // Store the API key initially if it's not already set
-        // This would normally be done through a settings screen
-        if (!SecurePreferences.isApiKeyConfigured(context)) {
-            val defaultApiKey = "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"
-            SecurePreferences.saveApiKey(context, defaultApiKey)
-            Log.d(TAG, "API key stored securely")
-        }
+        // Removed the insecure default API key initializer. The key **must** be stored via SecurePreferences
+        // from a settings screen or other secure entry point. This avoids hard-coding secrets in source control.
     }
     
     /**
@@ -46,7 +41,7 @@ class WhisperApiHelper(private val context: Context) {
                 val apiKey = SecurePreferences.getApiKey(context)
                 if (apiKey.isNullOrBlank()) {
                     return@withContext Result.failure(
-                        IllegalStateException("API key not configured")
+                        IllegalStateException("API key not configured – please add it via the app settings and retry.")
                     )
                 }
                 
