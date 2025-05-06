@@ -16,6 +16,8 @@ const babelLoaderConfiguration = {
     path.resolve(appDirectory, 'src'),
     // This needs to be included for web voice recognition polyfill
     path.resolve(appDirectory, 'node_modules/react-native-voice'),
+    // Compile vector icons for web so JSX inside node_modules is transformed
+    path.resolve(appDirectory, 'node_modules/react-native-vector-icons'),
   ],
   use: {
     loader: 'babel-loader',
@@ -57,7 +59,22 @@ module.exports = {
     },
   },
   module: {
-    rules: [babelLoaderConfiguration, imageLoaderConfiguration],
+    rules: [
+      babelLoaderConfiguration,
+      // Ensure vector icons inside node_modules are transpiled so JSX is handled
+      {
+        test: /react-native-vector-icons[\\/]lib[\\/].*\.js$/,
+        use: {
+          loader: 'babel-loader',
+          options: {
+            cacheDirectory: true,
+            presets: ['module:metro-react-native-babel-preset'],
+            plugins: ['react-native-web'],
+          },
+        },
+      },
+      imageLoaderConfiguration,
+    ],
   },
   plugins: [
     new webpack.DefinePlugin({
