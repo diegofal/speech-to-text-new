@@ -156,7 +156,9 @@ class VoskSpeechRecognizer(private val context: Context) : SpeechRecognizer, Rec
     /*  Factory                                                                                   */
     /*--------------------------------------------------------------------------------------------*/
 
-    class Factory : SpeechRecognizer.Factory {
-        override fun create(context: Context): SpeechRecognizer = VoskSpeechRecognizer(context)
+    companion object {
+        class Factory : SpeechRecognizer.Factory {
+            override fun create(context: Context): SpeechRecognizer = VoskSpeechRecognizer(context)
+        }
     }
 }

@@ -2,18 +2,32 @@ import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Button } from 'react-native-paper';
 
-const TranscriptionButton = ({ isListening, onStartListening, onStopListening }) => {
+const TranscriptionButton = ({ isListening, onStartListening, onStopListening, isEnabled }) => {
   return (
     <View style={styles.buttonContainer}>
-      <Button
-        mode="contained"
-        icon={isListening ? 'stop' : 'microphone'}
-        onPress={isListening ? onStopListening : onStartListening}
-        style={[styles.button, isListening ? styles.stopButton : styles.startButton]}
-        labelStyle={styles.buttonLabel}
-      >
-        {isListening ? 'Stop' : 'Start'} Transcribing
-      </Button>
+      {isListening ? (
+        <Button
+          mode="contained"
+          icon="stop"
+          onPress={onStopListening}
+          style={[styles.button, styles.stopButton]}
+          labelStyle={styles.buttonLabel}
+          disabled={!isEnabled}
+        >
+          Stop Transcribing
+        </Button>
+      ) : (
+        <Button
+          mode="contained"
+          icon="microphone"
+          onPress={onStartListening}
+          style={[styles.button, styles.startButton]}
+          labelStyle={styles.buttonLabel}
+          disabled={!isEnabled}
+        >
+          Start Transcribing
+        </Button>
+      )}
     </View>
   );
 };
@@ -27,6 +41,7 @@ const styles = StyleSheet.create({
   button: {
     paddingHorizontal: 16,
     borderRadius: 8,
+    minWidth: 200,
   },
   startButton: {
     backgroundColor: '#2196F3',

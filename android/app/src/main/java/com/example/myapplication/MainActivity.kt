@@ -465,6 +465,19 @@ class MainActivity : AppCompatActivity(), SpeechRecognitionListener {
         handler.removeCallbacksAndMessages(null)
     }
     
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 1 && resultCode == RESULT_OK) {
+            val results = data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
+            if (!results.isNullOrEmpty()) {
+                val recognizedText = results[0]
+                if (recognizedText.isNotEmpty()) {
+                    onResult(recognizedText)
+                }
+            }
+        }
+    }
+    
     // SpeechRecognitionListener implementation
     override fun onRecognitionStarted() {
         Log.d(TAG, "Recognition started")

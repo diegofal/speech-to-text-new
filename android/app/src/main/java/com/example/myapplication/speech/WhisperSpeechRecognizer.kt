@@ -198,36 +198,13 @@ class WhisperSpeechRecognizer(private val context: Context) : SpeechRecognizer {
     
     private fun convertLanguageCode(languageCode: String): String {
         // Convert Android language codes (e.g., en-US) to Whisper language codes (e.g., en)
-        return when {
-            languageCode.startsWith("en") -> "en"
-            languageCode.startsWith("es") -> "es"
-            languageCode.startsWith("fr") -> "fr"
-            languageCode.startsWith("de") -> "de"
-            languageCode.startsWith("it") -> "it"
-            languageCode.startsWith("pt") -> "pt"
-            languageCode.startsWith("ru") -> "ru"
-            languageCode.startsWith("zh") -> "zh"
-            languageCode.startsWith("ja") -> "ja"
-            languageCode.startsWith("ko") -> "ko"
-            else -> "en" // Default to English
-        }
+        return languageCode.split("-")[0].lowercase(Locale.getDefault())
     }
     
     override fun stopListening() {
-        if (isCurrentlyListening) {
-            isCurrentlyListening = false
-            
-            // Stop periodic transcription
-            transcriptionRunnable?.let {
-                handler.removeCallbacks(it)
-            }
-            
-            // Stop and process the final recording
-            val finalFilePath = stopRecording()
-            if (finalFilePath != null) {
-                processAudioWithWhisper(finalFilePath)
-            }
-        }
+        isCurrentlyListening = false
+        transcriptionRunnable?.let { handler.removeCallbacks(it) }
+        stopRecording()
     }
     
     override fun isListening(): Boolean {
@@ -235,17 +212,15 @@ class WhisperSpeechRecognizer(private val context: Context) : SpeechRecognizer {
     }
     
     override fun destroy() {
-        isCurrentlyListening = false
-        handler.removeCallbacksAndMessages(null)
-        stopRecording()
+        stopListening()
+        mediaRecorder?.release()
+        mediaRecorder = null
+        audioFilePath = null
     }
     
-    /**
-     * Factory for creating Whisper speech recognizers
-     */
-    class Factory : SpeechRecognizer.Factory {
-        override fun create(context: Context): SpeechRecognizer {
-            return WhisperSpeechRecognizer(context)
+    companion object {
+        class Factory : SpeechRecognizer.Factory {
+            override fun create(context: Context): SpeechRecognizer = WhisperSpeechRecognizer(context)
         }
     }
 }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { SafeAreaView, StyleSheet, View, Text, TextInput, ScrollView, Button, ActivityIndicator, Platform } from 'react-native';
+import { SafeAreaView, StyleSheet, View, Text, ScrollView, ActivityIndicator, Platform } from 'react-native';
+import { Button } from 'react-native-paper';
 
 // Import components
 import TranscriptionButton from '../components/TranscriptionButton';
@@ -13,6 +14,8 @@ const HomeScreen = () => {
   // State variables
   const [transcripts, setTranscripts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [finalTranscript, setFinalTranscript] = useState('');
+  const [isButtonEnabled, setIsButtonEnabled] = useState(false);
   
   // Use our custom voice recognition hook
   const {
@@ -33,6 +36,7 @@ const HomeScreen = () => {
       saveTranscript(transcript).then(newTranscript => {
         if (newTranscript) {
           setTranscripts(prev => [...prev, newTranscript]);
+          setFinalTranscript(transcript);
         }
       });
     }
@@ -59,6 +63,26 @@ const HomeScreen = () => {
     const success = await clearTranscripts();
     if (success) {
       setTranscripts([]);
+      setFinalTranscript('');
+    }
+  };
+
+  // Handler for starting transcription
+  const handleStartListening = async () => {
+    setIsButtonEnabled(true);
+    await startListening();
+  };
+
+  // Handler for stopping transcription
+  const handleStopListening = async () => {
+    await stopListening();
+    setIsButtonEnabled(false);
+    if (finalTranscript) {
+      saveTranscript(finalTranscript).then(newTranscript => {
+        if (newTranscript) {
+          setTranscripts(prev => [...prev, newTranscript]);
+        }
+      });
     }
   };
 
@@ -75,7 +99,13 @@ const HomeScreen = () => {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Meeting Transcriber</Text>
         {transcripts.length > 0 && (
-          <Button title="Clear All" onPress={handleClearTranscripts} />
+          <Button 
+            mode="outlined" 
+            onPress={handleClearTranscripts}
+            style={styles.clearButton}
+          >
+            Clear All
+          </Button>
         )}
       </View>
 
@@ -83,13 +113,15 @@ const HomeScreen = () => {
         <Text style={styles.statusText}>
           {isListening ? 'Listening...' : 'Not listening'}
         </Text>
-        {error !== '' && <Text style={styles.errorText}>Error: {error}</Text>}
+        {error !== '' && <Text style={styles.errorText}>{error}</Text>}
       </View>
 
       <View style={styles.buttonContainer}>
-        <Button
-          title={isListening ? 'Stop Transcribing' : 'Start Transcribing'}
-          onPress={isListening ? stopListening : startListening}
+        <TranscriptionButton
+          isListening={isListening}
+          onStartListening={handleStartListening}
+          onStopListening={handleStopListening}
+          isEnabled={isButtonEnabled}
         />
       </View>
 
@@ -97,6 +129,13 @@ const HomeScreen = () => {
         <View style={styles.liveContainer}>
           <Text style={styles.liveTitle}>Current:</Text>
           <Text style={styles.liveText}>{partialTranscript}</Text>
+        </View>
+      )}
+
+      {!isListening && finalTranscript && (
+        <View style={styles.finalContainer}>
+          <Text style={styles.finalTitle}>Final Transcript:</Text>
+          <Text style={styles.finalText}>{finalTranscript}</Text>
         </View>
       )}
 
@@ -146,6 +185,9 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: 'white',
   },
+  clearButton: {
+    borderColor: 'white',
+  },
   statusContainer: {
     padding: 10,
     alignItems: 'center',
@@ -178,6 +220,20 @@ const styles = StyleSheet.create({
   liveText: {
     fontSize: 16,
     fontStyle: 'italic',
+  },
+  finalContainer: {
+    padding: 16,
+    backgroundColor: '#f1f8e9',
+    margin: 10,
+    borderRadius: 8,
+  },
+  finalTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  finalText: {
+    fontSize: 16,
   },
   divider: {
     height: 1,

@@ -6,6 +6,8 @@ class VoiceWeb {
     this.recognition = null;
     this.eventEmitter = new NativeEventEmitter();
     this.listeners = {};
+    this.isContinuous = true;
+    this.lastFinalTranscript = '';
     
     // Initialize if we're in a browser environment
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -24,6 +26,7 @@ class VoiceWeb {
     this.recognition = new SpeechRecognition();
     this.recognition.continuous = true;
     this.recognition.interimResults = true;
+    this.recognition.maxAlternatives = 1;
     
     this.recognition.onstart = () => {
       this.emit('onSpeechStart', {});
@@ -42,23 +45,36 @@ class VoiceWeb {
         }
       }
       
-      // Send partial results
+      // Send partial results immediately
       if (interimTranscript) {
         this.emit('onSpeechPartialResults', { value: [interimTranscript] });
       }
       
       // Send final results
       if (finalTranscript) {
-        this.emit('onSpeechResults', { value: [finalTranscript] });
+        // Only send the new part of the transcript
+        const newTranscript = finalTranscript.substring(this.lastFinalTranscript.length);
+        if (newTranscript) {
+          this.emit('onSpeechResults', { value: [newTranscript] });
+          this.lastFinalTranscript = finalTranscript;
+        }
       }
     };
     
     this.recognition.onerror = (event) => {
       this.emit('onSpeechError', { error: event.error });
+      // Restart recognition if it was an error that can be recovered from
+      if (event.error !== 'no-speech' && event.error !== 'aborted') {
+        this.restartRecognition();
+      }
     };
     
     this.recognition.onend = () => {
       this.emit('onSpeechEnd', {});
+      // Restart recognition if we're in continuous mode
+      if (this.isContinuous) {
+        this.restartRecognition();
+      }
     };
     
     return true;
@@ -73,6 +89,9 @@ class VoiceWeb {
     }
     
     this.recognition.lang = locale;
+    this.lastFinalTranscript = '';
+    this.isContinuous = true;
+    
     try {
       this.recognition.start();
       return Promise.resolve();
@@ -93,43 +112,38 @@ class VoiceWeb {
   // Stop voice recognition
   stop() {
     if (this.recognition) {
-      try {
-        this.recognition.stop();
-      } catch (error) {
-        console.error('Error stopping recognition:', error);
-      }
+      this.isContinuous = false;
+      this.recognition.stop();
     }
     return Promise.resolve();
   }
 
-  // Clean up resources
-  destroy() {
-    if (this.recognition) {
-      this.recognition.stop();
-      this.recognition = null;
+  // Restart recognition after a short delay
+  restartRecognition() {
+    if (this.isContinuous) {
+      setTimeout(() => {
+        try {
+          this.recognition.start();
+        } catch (error) {
+          console.warn('Failed to restart recognition:', error);
+        }
+      }, 100);
     }
-    return Promise.resolve();
   }
 
   // Add event listener
-  addEventListener(eventName, callback) {
+  addListener(eventName, callback) {
     if (!this.listeners[eventName]) {
       this.listeners[eventName] = [];
     }
     this.listeners[eventName].push(callback);
-    return { remove: () => this.removeEventListener(eventName, callback) };
   }
 
   // Remove event listener
-  removeEventListener(eventName, callback) {
+  removeListener(eventName, callback) {
     if (this.listeners[eventName]) {
       this.listeners[eventName] = this.listeners[eventName].filter(cb => cb !== callback);
     }
-  }
-
-  // Remove all listeners
-  removeAllListeners() {
-    this.listeners = {};
   }
 
   // Emit event to all listeners
@@ -139,31 +153,14 @@ class VoiceWeb {
     }
   }
 
-  // Define event handlers
-  set onSpeechStart(fn) { this.addEventListener('onSpeechStart', fn); }
-  set onSpeechRecognized(fn) { this.addEventListener('onSpeechRecognized', fn); }
-  set onSpeechEnd(fn) { this.addEventListener('onSpeechEnd', fn); }
-  set onSpeechError(fn) { this.addEventListener('onSpeechError', fn); }
-  set onSpeechResults(fn) { this.addEventListener('onSpeechResults', fn); }
-  set onSpeechPartialResults(fn) { this.addEventListener('onSpeechPartialResults', fn); }
-  set onSpeechVolumeChanged(fn) { this.addEventListener('onSpeechVolumeChanged', fn); }
-}
-
-// Create a fallback object that will be used if Voice native module is not available
-const VoiceFallback = new VoiceWeb();
-
-// Try to use the native module if available, otherwise use our web implementation
-let VoiceModule;
-try {
-  // Check if we have the native Voice module
-  if (Platform.OS !== 'web' && NativeModules.Voice) {
-    VoiceModule = NativeModules.Voice;
-  } else {
-    VoiceModule = VoiceFallback;
+  // Destroy the recognition instance
+  destroy() {
+    if (this.recognition) {
+      this.isContinuous = false;
+      this.recognition.stop();
+      this.recognition = null;
+    }
   }
-} catch (e) {
-  console.warn('Error initializing Voice module, falling back to web implementation:', e);
-  VoiceModule = VoiceFallback;
 }
 
-export default VoiceModule;
+export default new VoiceWeb();

@@ -25,9 +25,9 @@ class SpeechRecognizerManager(private val context: Context) {
         
         // Create the new recognizer
         currentRecognizer = when (type) {
-            TYPE_WHISPER -> WhisperSpeechRecognizer.Factory().create(context)
-            TYPE_VOSK -> VoskSpeechRecognizer.Factory().create(context)
-            else -> AndroidSpeechRecognizer.Factory().create(context)
+            TYPE_WHISPER -> WhisperSpeechRecognizer.Companion.Factory().create(context)
+            TYPE_VOSK -> VoskSpeechRecognizer.Companion.Factory().create(context)
+            else -> AndroidSpeechRecognizer.Companion.Factory().create(context)
         }
         
         currentType = type
@@ -39,7 +39,7 @@ class SpeechRecognizerManager(private val context: Context) {
      */
     fun getCurrentRecognizer(): SpeechRecognizer {
         if (currentRecognizer == null) {
-            currentRecognizer = AndroidSpeechRecognizer.Factory().create(context)
+            currentRecognizer = AndroidSpeechRecognizer.Companion.Factory().create(context)
             currentType = TYPE_ANDROID
         }
         return currentRecognizer!!
