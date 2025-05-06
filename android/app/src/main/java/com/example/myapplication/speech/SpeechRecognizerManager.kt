@@ -10,6 +10,7 @@ class SpeechRecognizerManager(private val context: Context) {
     companion object {
         const val TYPE_ANDROID = 0
         const val TYPE_WHISPER = 1
+        const val TYPE_VOSK = 2
     }
     
     private var currentRecognizer: SpeechRecognizer? = null
@@ -25,6 +26,7 @@ class SpeechRecognizerManager(private val context: Context) {
         // Create the new recognizer
         currentRecognizer = when (type) {
             TYPE_WHISPER -> WhisperSpeechRecognizer.Factory().create(context)
+            TYPE_VOSK -> VoskSpeechRecognizer.Factory().create(context)
             else -> AndroidSpeechRecognizer.Factory().create(context)
         }
         

@@ -44,6 +44,7 @@ class MainActivity : AppCompatActivity(), SpeechRecognitionListener {
     private lateinit var recognizerRadioGroup: RadioGroup
     private lateinit var radioAndroid: RadioButton
     private lateinit var radioWhisper: RadioButton
+    private lateinit var radioVosk: RadioButton
     
     // Speech recognition
     private lateinit var speechRecognizerManager: SpeechRecognizerManager
@@ -68,6 +69,10 @@ class MainActivity : AppCompatActivity(), SpeechRecognitionListener {
     private var mediaRecorder: MediaRecorder? = null
     private var audioFilePath: String? = null
     private var isRecording = false
+
+    companion object {
+        const val MENU_VOSK_RECOGNIZER_ID = 103
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -96,6 +101,7 @@ class MainActivity : AppCompatActivity(), SpeechRecognitionListener {
         recognizerRadioGroup = findViewById(R.id.recognizerRadioGroup)
         radioAndroid = findViewById(R.id.radioAndroid)
         radioWhisper = findViewById(R.id.radioWhisper)
+        radioVosk = findViewById(R.id.radioVosk)
 
         // Set up language selection listener
         languageRadioGroup.setOnCheckedChangeListener { _, checkedId ->
@@ -124,6 +130,12 @@ class MainActivity : AppCompatActivity(), SpeechRecognitionListener {
                     if (currentRecognizerType != SpeechRecognizerManager.TYPE_WHISPER) {
                         switchSpeechRecognizer(SpeechRecognizerManager.TYPE_WHISPER)
                         Toast.makeText(this, "Switched to Whisper Speech Recognizer (Experimental)", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                R.id.radioVosk -> {
+                    if (currentRecognizerType != SpeechRecognizerManager.TYPE_VOSK) {
+                        switchSpeechRecognizer(SpeechRecognizerManager.TYPE_VOSK)
+                        Toast.makeText(this, "Switched to Offline Vosk Recognizer", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -162,6 +174,13 @@ class MainActivity : AppCompatActivity(), SpeechRecognitionListener {
                 if (currentRecognizerType != SpeechRecognizerManager.TYPE_WHISPER) {
                     switchSpeechRecognizer(SpeechRecognizerManager.TYPE_WHISPER)
                     Toast.makeText(this, "Switched to Whisper Speech Recognizer", Toast.LENGTH_SHORT).show()
+                }
+                true
+            }
+            R.id.menu_vosk_recognizer -> {
+                if (currentRecognizerType != SpeechRecognizerManager.TYPE_VOSK) {
+                    switchSpeechRecognizer(SpeechRecognizerManager.TYPE_VOSK)
+                    Toast.makeText(this, "Switched to Offline Vosk Recognizer", Toast.LENGTH_SHORT).show()
                 }
                 true
             }

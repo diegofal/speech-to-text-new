@@ -11,4 +11,9 @@
         android:id="@+id/menu_whisper_recognizer"
         android:title="Whisper Recognizer"
         app:showAsAction="never" />
+    
+    <item
+        android:id="@+id/menu_vosk_recognizer"
+        android:title="Offline (Vosk) Recognizer"
+        app:showAsAction="never" />
 </menu>

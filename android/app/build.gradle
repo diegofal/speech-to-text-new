@@ -67,7 +67,65 @@ dependencies {
     // Encrypted Shared Preferences
     implementation 'androidx.security:security-crypto:1.1.0-alpha06'
 
+    // Offline speech recognition with Vosk (needs JNA)
+    implementation 'net.java.dev.jna:jna:5.13.0@aar'
+    implementation 'com.alphacephei:vosk-android:0.3.47@aar'
+
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
 }
+
+// -----------------------------------------------------------------------------
+// Offline Vosk model download & extraction (runs before the first build)
+// -----------------------------------------------------------------------------
+
+import java.net.URL
+import java.util.UUID
+
+def voskModelUrl = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+def assetsDir = "$projectDir/src/main/assets"
+def modelDir = "$assetsDir/model-en-us"
+
+tasks.register("prepareVoskModel") {
+    doLast {
+        def modelFolder = file(modelDir)
+        if (modelFolder.exists()) {
+            def uuidFile = new File(modelFolder, "uuid")
+            if (!uuidFile.exists()) {
+                uuidFile.text = UUID.randomUUID().toString()
+                println "Generated missing uuid file: ${uuidFile.absolutePath}"
+            }
+            println "✓ Vosk offline model already present -> $modelDir"
+            return
+        }
+
+        println "Downloading Vosk offline model (~50 MB)…"
+        file(assetsDir).mkdirs()
+        def zipFile = file("$buildDir/vosk-model.zip")
+        if (!zipFile.exists()) {
+            new URL(voskModelUrl).withInputStream { ins ->
+                zipFile.withOutputStream { out -> out << ins }
+            }
+        }
+
+        println "Extracting model…"
+        copy {
+            from zipTree(zipFile)
+            into assetsDir
+        }
+
+        // The archive extracts into a folder like 'vosk-model-small-en-us-0.15'. Rename to 'model-en-us'.
+        file("$assetsDir/vosk-model-small-en-us-0.15").renameTo(modelFolder)
+        // Add uuid file required by StorageService sync logic
+        def uuidFile = new File(modelFolder, "uuid")
+        if (!uuidFile.exists()) {
+            uuidFile.text = UUID.randomUUID().toString()
+            println "Generated uuid file for model: ${uuidFile.absolutePath}"
+        }
+        println "✓ Model ready at $modelDir"
+    }
+}
+
+// Ensure model is present before compiling
+preBuild.dependsOn tasks.named("prepareVoskModel")
