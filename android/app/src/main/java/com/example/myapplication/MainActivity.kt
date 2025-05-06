@@ -3,14 +3,15 @@ package com.example.myapplication
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.MediaRecorder
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.util.Log
-import android.view.View
+import android.view.Menu
+import android.view.MenuItem
 import android.widget.Button
 import android.widget.RadioButton
 import android.widget.RadioGroup
@@ -19,43 +20,82 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.example.myapplication.speech.SpeechRecognitionListener
+import com.example.myapplication.speech.SpeechRecognizer
+import com.example.myapplication.speech.SpeechRecognizerManager
+import java.io.File
+import java.io.IOException
+import java.text.SimpleDateFormat
 import java.util.*
 
-class MainActivity : AppCompatActivity(), RecognitionListener {
-    private val TAG = "SpeechRecognitionDemo"
+class MainActivity : AppCompatActivity(), SpeechRecognitionListener {
+    private val TAG = "SpeechTranscriber"
     private val RECORD_AUDIO_PERMISSION_REQUEST = 1
 
-    private lateinit var speechRecognizer: SpeechRecognizer
+    // UI components
     private lateinit var startButton: Button
     private lateinit var stopButton: Button
     private lateinit var resultTextView: TextView
     private lateinit var partialResultTextView: TextView
+    private lateinit var timerTextView: TextView
     private lateinit var languageRadioGroup: RadioGroup
     private lateinit var radioEnglish: RadioButton
     private lateinit var radioSpanish: RadioButton
+    private lateinit var recognizerRadioGroup: RadioGroup
+    private lateinit var radioAndroid: RadioButton
+    private lateinit var radioWhisper: RadioButton
     
-    private var isListening = false
-    private var keepRecognizing = false // Flag to control continuous recognition
-    private var allResults = StringBuilder()
+    // Speech recognition
+    private lateinit var speechRecognizerManager: SpeechRecognizerManager
+    private lateinit var speechRecognizer: SpeechRecognizer
+    private var currentRecognizerType = SpeechRecognizerManager.TYPE_ANDROID
+    
+    // Results tracking
+    private val allResults = StringBuilder()
     private val handler = Handler(Looper.getMainLooper())
     
     // Language settings
     private var selectedLanguage = "en-US" // Default to English
+    
+    // Timestamp tracking
+    private var startTime: Long = 0
+    private val timestampFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+    private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    private var elapsedTimeInSeconds = 0
+    private var timerRunnable: Runnable? = null
+    
+    // Audio recording
+    private var mediaRecorder: MediaRecorder? = null
+    private var audioFilePath: String? = null
+    private var isRecording = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
+        
+        // Initialize UI components
+        initializeUI()
+        
+        // Initialize speech recognizer
+        speechRecognizerManager = SpeechRecognizerManager(this)
+        switchSpeechRecognizer(SpeechRecognizerManager.TYPE_ANDROID)
+        
+        updateButtonState(false)
+        updateLabelsForLanguage(radioEnglish.isChecked)
+    }
+    
+    private fun initializeUI() {
         startButton = findViewById(R.id.startButton)
         stopButton = findViewById(R.id.stopButton)
         resultTextView = findViewById(R.id.resultTextView)
         partialResultTextView = findViewById(R.id.partialResultTextView)
+        timerTextView = findViewById(R.id.timerTextView)
         languageRadioGroup = findViewById(R.id.languageRadioGroup)
         radioEnglish = findViewById(R.id.radioEnglish)
         radioSpanish = findViewById(R.id.radioSpanish)
-
-        // Initialize speech recognizer
-        initializeSpeechRecognizer()
+        recognizerRadioGroup = findViewById(R.id.recognizerRadioGroup)
+        radioAndroid = findViewById(R.id.radioAndroid)
+        radioWhisper = findViewById(R.id.radioWhisper)
 
         // Set up language selection listener
         languageRadioGroup.setOnCheckedChangeListener { _, checkedId ->
@@ -69,13 +109,23 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                     updateLabelsForLanguage(isEnglish = false)
                 }
             }
-            
-            // If we're already listening, we need to restart with the new language
-            if (isListening) {
-                stopRecognition()
-                handler.postDelayed({
-                    startRecognition()
-                }, 200)
+        }
+        
+        // Set up recognizer type selection listener
+        recognizerRadioGroup.setOnCheckedChangeListener { _, checkedId ->
+            when (checkedId) {
+                R.id.radioAndroid -> {
+                    if (currentRecognizerType != SpeechRecognizerManager.TYPE_ANDROID) {
+                        switchSpeechRecognizer(SpeechRecognizerManager.TYPE_ANDROID)
+                        Toast.makeText(this, "Switched to Android Speech Recognizer", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                R.id.radioWhisper -> {
+                    if (currentRecognizerType != SpeechRecognizerManager.TYPE_WHISPER) {
+                        switchSpeechRecognizer(SpeechRecognizerManager.TYPE_WHISPER)
+                        Toast.makeText(this, "Switched to Whisper Speech Recognizer (Experimental)", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         }
 
@@ -84,20 +134,39 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         }
 
         stopButton.setOnClickListener {
-            keepRecognizing = false
-            stopRecognition()
+            stopSession()
         }
-
-        updateButtonState()
-        updateLabelsForLanguage(radioEnglish.isChecked)
     }
     
-    private fun initializeSpeechRecognizer() {
-        if (::speechRecognizer.isInitialized) {
-            speechRecognizer.destroy()
+    private fun switchSpeechRecognizer(type: Int) {
+        speechRecognizer = speechRecognizerManager.createSpeechRecognizer(type)
+        speechRecognizer.setListener(this)
+        currentRecognizerType = type
+    }
+    
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.main_menu, menu)
+        return true
+    }
+    
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.menu_android_recognizer -> {
+                if (currentRecognizerType != SpeechRecognizerManager.TYPE_ANDROID) {
+                    switchSpeechRecognizer(SpeechRecognizerManager.TYPE_ANDROID)
+                    Toast.makeText(this, "Switched to Android Speech Recognizer", Toast.LENGTH_SHORT).show()
+                }
+                true
+            }
+            R.id.menu_whisper_recognizer -> {
+                if (currentRecognizerType != SpeechRecognizerManager.TYPE_WHISPER) {
+                    switchSpeechRecognizer(SpeechRecognizerManager.TYPE_WHISPER)
+                    Toast.makeText(this, "Switched to Whisper Speech Recognizer", Toast.LENGTH_SHORT).show()
+                }
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
         }
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
-        speechRecognizer.setRecognitionListener(this)
     }
     
     private fun updateLabelsForLanguage(isEnglish: Boolean) {
@@ -115,71 +184,234 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     }
 
     private fun checkPermissionAndStartListening() {
-        val permission = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-        if (permission != PackageManager.PERMISSION_GRANTED) {
+        val permissions = mutableListOf(
+            Manifest.permission.RECORD_AUDIO
+        )
+        
+        // Add storage permissions for API < 33 (for audio recording)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+        
+        // Check if any permissions are missing
+        val missingPermissions = permissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }.toTypedArray()
+        
+        if (missingPermissions.isNotEmpty()) {
             ActivityCompat.requestPermissions(
                 this,
-                arrayOf(Manifest.permission.RECORD_AUDIO),
+                missingPermissions,
                 RECORD_AUDIO_PERMISSION_REQUEST
             )
         } else {
-            allResults.clear() // Clear previous results when starting a new session
-            resultTextView.text = ""
-            partialResultTextView.text = ""
-            keepRecognizing = true
-            startRecognition()
+            startSession()
         }
     }
     
-    private fun createRecognizerIntent(): Intent {
-        return Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, selectedLanguage)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-            // Add dictation mode for better continuous recognition
-            putExtra("android.speech.extra.DICTATION_MODE", true)
+    private fun startSession() {
+        // Clear previous results when starting a new session
+        allResults.clear()
+        resultTextView.text = ""
+        partialResultTextView.text = ""
+        
+        // Start timer
+        startTimer()
+        
+        // Start audio recording
+        startRecording()
+        
+        // Start speech recognition
+        speechRecognizer.startListening(selectedLanguage)
+        
+        // Update button state
+        updateButtonState(true)
+    }
+    
+    private fun stopSession() {
+        // Stop speech recognition
+        speechRecognizer.stopListening()
+        
+        // Stop recording
+        stopRecording()
+        
+        // Stop timer
+        stopTimer()
+        
+        // Save transcript
+        saveTranscriptToFile()
+        
+        // Update button state
+        updateButtonState(false)
+    }
+    
+    // Audio recording methods
+    private fun startRecording() {
+        try {
+            // Create file for recording in the app's private storage
+            val dateTime = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val recordingDir = getExternalFilesDir(Environment.DIRECTORY_MUSIC)
+            if (recordingDir != null && !recordingDir.exists()) {
+                recordingDir.mkdirs()
+            }
+            
+            if (recordingDir == null) {
+                Log.e(TAG, "Error: External files directory is null")
+                Toast.makeText(this, "Storage unavailable", Toast.LENGTH_SHORT).show()
+                return
+            }
+            
+            val recordingFile = File(recordingDir, "recording_${dateTime}.3gp")
+            audioFilePath = recordingFile.absolutePath
+            
+            Log.d(TAG, "Recording setup: Will store audio at $audioFilePath")
+            
+            // Initialize media recorder
+            try {
+                mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    MediaRecorder(this)
+                } else {
+                    @Suppress("DEPRECATION")
+                    MediaRecorder()
+                }
+                
+                mediaRecorder?.apply {
+                    setAudioSource(MediaRecorder.AudioSource.MIC)
+                    setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP)
+                    setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB)
+                    setOutputFile(audioFilePath)
+                    prepare()
+                    start()
+                    
+                    isRecording = true
+                    Log.d(TAG, "Recording started: $audioFilePath")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error initializing recorder: ${e.message}")
+                Toast.makeText(this, "Error with recorder: ${e.message}", Toast.LENGTH_SHORT).show()
+                
+                // Continue without recording
+                isRecording = false
+                mediaRecorder = null
+            }
+        } catch (e: IOException) {
+            Log.e(TAG, "Error creating recording file: ${e.message}")
+            Toast.makeText(this, "Could not start recording audio: ${e.message}", Toast.LENGTH_SHORT).show()
+            
+            // Continue without recording
+            isRecording = false
         }
     }
-
-    private fun startRecognition() {
-        if (!keepRecognizing) {
-            return // Don't start if we're not supposed to keep recognizing
+    
+    private fun stopRecording() {
+        if (isRecording && mediaRecorder != null) {
+            try {
+                mediaRecorder?.apply {
+                    stop()
+                    release()
+                }
+                mediaRecorder = null
+                isRecording = false
+                
+                // Notify user
+                val message = if (selectedLanguage == "es-ES") 
+                    "Grabación guardada en: $audioFilePath" 
+                else 
+                    "Recording saved to: $audioFilePath"
+                    
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                Log.d(TAG, "Recording stopped and saved: $audioFilePath")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error stopping recording: ${e.message}")
+                mediaRecorder?.release()
+                mediaRecorder = null
+                isRecording = false
+            }
+        }
+    }
+    
+    // Timer methods
+    private fun startTimer() {
+        startTime = System.currentTimeMillis()
+        elapsedTimeInSeconds = 0
+        updateTimerDisplay()
+        
+        // Create runnable for timer updates
+        timerRunnable = object : Runnable {
+            override fun run() {
+                elapsedTimeInSeconds = ((System.currentTimeMillis() - startTime) / 1000).toInt()
+                updateTimerDisplay()
+                handler.postDelayed(this, 1000) // Update every second
+            }
         }
         
-        if (isListening) {
-            // Already listening, don't start again
-            return
+        // Start timer updates
+        handler.post(timerRunnable!!)
+    }
+    
+    private fun stopTimer() {
+        timerRunnable?.let {
+            handler.removeCallbacks(it)
         }
+    }
+    
+    private fun updateTimerDisplay() {
+        val timeString = getFormattedElapsedTime()
+        timerTextView.text = timeString
+    }
+    
+    private fun getFormattedElapsedTime(): String {
+        val hours = elapsedTimeInSeconds / 3600
+        val minutes = (elapsedTimeInSeconds % 3600) / 60
+        val seconds = elapsedTimeInSeconds % 60
+        return String.format("%02d:%02d:%02d", hours, minutes, seconds)
+    }
+    
+    private fun getCurrentTimestamp(): String {
+        val calendar = Calendar.getInstance()
+        val date = dateFormat.format(calendar.time)
+        val time = timestampFormat.format(calendar.time)
+        return "[$date $time]"
+    }
+
+    private fun saveTranscriptToFile() {
+        if (allResults.isEmpty()) return
         
         try {
-            Log.d(TAG, "Starting speech recognition")
-            speechRecognizer.startListening(createRecognizerIntent())
-            isListening = true
-            updateButtonState()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error starting speech recognition: ${e.message}")
-            Toast.makeText(this, "Error starting speech recognition", Toast.LENGTH_SHORT).show()
-            isListening = false
-            updateButtonState()
-        }
-    }
-
-    private fun stopRecognition() {
-        if (isListening) {
-            try {
-                speechRecognizer.stopListening()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error stopping speech recognition: ${e.message}")
+            val dateTime = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val transcriptDir = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
+            
+            if (transcriptDir == null) {
+                Log.e(TAG, "Error: External documents directory is null")
+                Toast.makeText(this, "Storage unavailable for saving transcript", Toast.LENGTH_SHORT).show()
+                return
             }
-            isListening = false
-            updateButtonState()
+            
+            if (!transcriptDir.exists()) {
+                transcriptDir.mkdirs()
+            }
+            
+            val transcriptFile = File(transcriptDir, "transcript_${dateTime}.txt")
+            
+            transcriptFile.writeText(allResults.toString())
+            
+            val message = if (selectedLanguage == "es-ES") 
+                "Transcripción guardada en: ${transcriptFile.absolutePath}" 
+            else 
+                "Transcript saved to: ${transcriptFile.absolutePath}"
+                
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+            Log.d(TAG, "Transcript saved to: ${transcriptFile.absolutePath}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving transcript: ${e.message}")
+            Toast.makeText(this, "Error saving transcript", Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun updateButtonState() {
-        startButton.isEnabled = !isListening
-        stopButton.isEnabled = isListening
+    private fun updateButtonState(isActive: Boolean) {
+        startButton.isEnabled = !isActive
+        stopButton.isEnabled = isActive
     }
 
     override fun onRequestPermissionsResult(
@@ -189,14 +421,13 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == RECORD_AUDIO_PERMISSION_REQUEST) {
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                keepRecognizing = true
-                startRecognition()
+            if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+                startSession()
             } else {
                 val message = if (selectedLanguage == "es-ES") {
-                    "Permiso denegado para el reconocimiento de voz"
+                    "Permisos requeridos para usar la aplicación"
                 } else {
-                    "Permission denied for speech recognition"
+                    "Permissions required to use the app"
                 }
                 Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
             }
@@ -205,109 +436,56 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     
     override fun onPause() {
         super.onPause()
-        // Stop recognition when app goes to background
-        keepRecognizing = false
-        stopRecognition()
+        stopSession()
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        keepRecognizing = false
+        stopSession()
+        speechRecognizerManager.destroyCurrentRecognizer()
         handler.removeCallbacksAndMessages(null)
-        speechRecognizer.destroy()
     }
-
-    // RecognitionListener implementation
-    override fun onReadyForSpeech(params: Bundle?) {
-        Log.d(TAG, "onReadyForSpeech")
-    }
-
-    override fun onBeginningOfSpeech() {
-        Log.d(TAG, "onBeginningOfSpeech")
-    }
-
-    override fun onRmsChanged(rmsdB: Float) {
-        // Could be used to show a volume indicator
-    }
-
-    override fun onBufferReceived(buffer: ByteArray?) {
-        // Not used
-    }
-
-    override fun onEndOfSpeech() {
-        Log.d(TAG, "onEndOfSpeech")
-        isListening = false
-    }
-
-    override fun onError(error: Int) {
-        val errorMessage = when (error) {
-            SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
-            SpeechRecognizer.ERROR_CLIENT -> "Client side error"
-            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Insufficient permissions"
-            SpeechRecognizer.ERROR_NETWORK -> "Network error"
-            SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout"
-            SpeechRecognizer.ERROR_NO_MATCH -> "No recognition result matched"
-            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Recognition service busy"
-            SpeechRecognizer.ERROR_SERVER -> "Server error"
-            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech input"
-            else -> "Unknown error"
-        }
-        
-        Log.e(TAG, "onError: $errorMessage (code: $error)")
-        isListening = false
-        updateButtonState()
-        
-        // For common errors, restart the recognition automatically if we're supposed to keep going
-        if (keepRecognizing && (error == SpeechRecognizer.ERROR_NO_MATCH || 
-                          error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)) {
-            Log.d(TAG, "Restarting recognition after error")
-            handler.postDelayed({
-                startRecognition()
-            }, 300)
-        } else if (error != SpeechRecognizer.ERROR_CLIENT) {
-            // For other errors except client errors (which happen during normal operation), show a message
-            Toast.makeText(this, "Error: $errorMessage", Toast.LENGTH_SHORT).show()
+    
+    // SpeechRecognitionListener implementation
+    override fun onRecognitionStarted() {
+        Log.d(TAG, "Recognition started")
+        runOnUiThread {
+            partialResultTextView.text = "Listening..."
         }
     }
-
-    override fun onResults(results: Bundle?) {
-        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-        if (matches != null && matches.isNotEmpty()) {
-            val text = matches[0]
-            Log.d(TAG, "onResults: $text")
-            
-            // Append to all results with a space
-            if (allResults.isNotEmpty() && !text.startsWith(" ")) {
-                allResults.append(" ")
-            }
-            allResults.append(text)
-            
-            // Show full transcription in the result text view
-            resultTextView.text = allResults.toString()
-            
-            // Continue listening if we're supposed to keep recognizing
-            isListening = false
-            updateButtonState()
-            
-            if (keepRecognizing) {
-                Log.d(TAG, "Restarting recognition after results")
-                handler.postDelayed({
-                    startRecognition()
-                }, 300)
-            }
-        }
-    }
-
-    override fun onPartialResults(partialResults: Bundle?) {
-        val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-        if (matches != null && matches.isNotEmpty()) {
-            val text = matches[0]
+    
+    override fun onPartialResult(text: String) {
+        Log.d(TAG, "Partial result: $text")
+        runOnUiThread {
             partialResultTextView.text = text
-            Log.d(TAG, "onPartialResults: $text")
         }
     }
-
-    override fun onEvent(eventType: Int, params: Bundle?) {
-        Log.d(TAG, "onEvent: $eventType")
+    
+    override fun onResult(text: String) {
+        Log.d(TAG, "Final result: $text")
+        
+        // Get current timestamp
+        val timestamp = getCurrentTimestamp()
+        val elapsedTime = getFormattedElapsedTime()
+        
+        // Add to results
+        if (allResults.isNotEmpty()) {
+            allResults.append("\n\n")
+        }
+        allResults.append("$timestamp ($elapsedTime)\n$text")
+        
+        // Update UI
+        runOnUiThread {
+            resultTextView.text = allResults.toString()
+            partialResultTextView.text = ""
+        }
+    }
+    
+    override fun onError(errorMessage: String) {
+        Log.e(TAG, "Recognition error: $errorMessage")
+        runOnUiThread {
+            partialResultTextView.text = "Error: $errorMessage"
+            Toast.makeText(this, errorMessage, Toast.LENGTH_SHORT).show()
+        }
     }
 }
