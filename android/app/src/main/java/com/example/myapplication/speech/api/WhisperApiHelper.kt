@@ -1,18 +1,11 @@
 package com.example.myapplication.speech.api
 
 import android.content.Context
-import android.media.MediaMetadataRetriever
-import android.net.Uri
 import android.util.Log
-import com.example.myapplication.utils.SecurePreferences
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
-import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 
 /**
@@ -21,105 +14,54 @@ import java.io.IOException
 class WhisperApiHelper(private val context: Context) {
     companion object {
         private const val TAG = "WhisperApiHelper"
-        private const val DEFAULT_MODEL = "whisper-1"
-    }
-    
-    init {
-        // Removed the insecure default API key initializer. The key **must** be stored via SecurePreferences
-        // from a settings screen or other secure entry point. This avoids hard-coding secrets in source control.
     }
     
     /**
      * Transcribe audio using the OpenAI Whisper API
      */
-    suspend fun transcribeAudio(audioFilePath: String, language: String? = null): Result<String> {
-        return withContext(Dispatchers.IO) {
-            try {
-                Log.d(TAG, "Preparing to transcribe audio file: $audioFilePath")
-                
-                // Get the API key from secure storage
-                val apiKey = SecurePreferences.getApiKey(context)
-                if (apiKey.isNullOrBlank()) {
-                    return@withContext Result.failure(
-                        IllegalStateException("API key not configured – please add it via the app settings and retry.")
-                    )
-                }
-                
-                // Ensure the file exists
-                val audioFile = File(audioFilePath)
-                if (!audioFile.exists()) {
-                    return@withContext Result.failure(
-                        IOException("Audio file not found: $audioFilePath")
-                    )
-                }
-                
-                // Convert the audio to MP3 if needed (Whisper requires MP3, WAV, WebM, or M4A)
-                val processedFile = if (audioFilePath.endsWith(".3gp")) {
-                    convertAudioToMp3(audioFile)
-                } else {
-                    audioFile
-                }
-                
-                // Prepare the request parts
-                val fileRequestBody = processedFile.asRequestBody("audio/mpeg".toMediaTypeOrNull())
-                val filePart = MultipartBody.Part.createFormData("file", processedFile.name, fileRequestBody)
-                
-                // Set up other parameters
-                val modelPart = DEFAULT_MODEL.toRequestBody("text/plain".toMediaTypeOrNull())
-                val languagePart = language?.toRequestBody("text/plain".toMediaTypeOrNull())
-                val authHeader = "Bearer $apiKey"
-                
-                // Make the API call
-                Log.d(TAG, "Sending request to Whisper API")
-                val response = RetrofitClient.whisperApiService.transcribeAudio(
-                    authorization = authHeader,
-                    file = filePart,
-                    model = modelPart,
-                    language = languagePart
+    suspend fun transcribeAudio(
+        audioFilePath: String,
+        language: String? = null,
+        apiKey: String
+    ): Result<String> {
+        return try {
+            val audioFile = File(audioFilePath)
+            if (!audioFile.exists()) {
+                return Result.failure(IOException("Audio file not found"))
+            }
+            
+            val requestBody = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart(
+                    "file",
+                    audioFile.name,
+                    audioFile.asRequestBody("audio/*".toMediaTypeOrNull())
                 )
-                
-                // Process the response
-                if (response.isSuccessful && response.body() != null) {
-                    val result = response.body()!!.text
-                    Log.d(TAG, "Transcription successful: ${result.take(50)}...")
-                    Result.success(result)
-                } else {
-                    val errorBody = response.errorBody()?.string() ?: "Unknown error"
-                    Log.e(TAG, "API Error: $errorBody")
-                    Result.failure(IOException("API Error: $errorBody"))
+                .addFormDataPart("model", "whisper-1")
+                .apply {
+                    language?.let {
+                        addFormDataPart("language", it)
+                    }
+                    addFormDataPart("response_format", "text")
                 }
-                
-            } catch (e: Exception) {
-                Log.e(TAG, "Transcription failed", e)
-                Result.failure(e)
+                .build()
+            
+            val response = RetrofitClient.whisperApiService.transcribeAudio(
+                authorization = "Bearer $apiKey",
+                file = requestBody.parts[0],
+                model = requestBody.parts[1].body,
+                language = requestBody.parts.getOrNull(2)?.body,
+                responseFormat = requestBody.parts.last().body
+            )
+            
+            if (response.isSuccessful && response.body() != null) {
+                Result.success(response.body()!!)
+            } else {
+                val errorBody = response.errorBody()?.string() ?: "Unknown error"
+                Result.failure(IOException("API Error: $errorBody"))
             }
-        }
-    }
-    
-    /**
-     * Converts a 3GP audio file to MP3 format using Android's media framework
-     * Note: In a real app, you'd use a proper audio conversion library
-     * This is a simplified example that would need to be enhanced for production
-     */
-    private suspend fun convertAudioToMp3(inputFile: File): File {
-        return withContext(Dispatchers.IO) {
-            try {
-                // For demonstration - in a real app, implement proper conversion
-                // This is just returning the original file as we don't have a full
-                // audio conversion implementation in this example
-                Log.w(TAG, "Audio conversion not fully implemented - using original file")
-                
-                // In a real app, you would:
-                // 1. Use FFmpeg or another library to convert the audio format
-                // 2. Save the converted audio to a new file
-                // 3. Return the new file path
-                
-                // For now, we'll just return the original file
-                inputFile
-            } catch (e: Exception) {
-                Log.e(TAG, "Audio conversion failed", e)
-                throw e
-            }
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 }

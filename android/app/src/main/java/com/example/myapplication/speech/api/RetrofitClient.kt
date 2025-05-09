@@ -12,28 +12,21 @@ import java.util.concurrent.TimeUnit
 object RetrofitClient {
     private const val BASE_URL = "https://api.openai.com/"
     
-    private val okHttpClient by lazy {
-        val loggingInterceptor = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
-        }
-        
-        OkHttpClient.Builder()
-            .addInterceptor(loggingInterceptor)
-            .connectTimeout(60, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
-            .writeTimeout(60, TimeUnit.SECONDS)
-            .build()
-    }
+    private val okHttpClient = OkHttpClient.Builder()
+        .addInterceptor(HttpLoggingInterceptor().apply {
+            level = HttpLoggingInterceptor.Level.BASIC
+        })
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .build()
     
-    private val retrofit by lazy {
-        Retrofit.Builder()
-            .baseUrl(BASE_URL)
-            .client(okHttpClient)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-    }
+    private val retrofit = Retrofit.Builder()
+        .baseUrl(BASE_URL)
+        .client(okHttpClient)
+        .addConverterFactory(TextResponseConverter())
+        .addConverterFactory(GsonConverterFactory.create())
+        .build()
     
-    val whisperApiService: WhisperApiService by lazy {
-        retrofit.create(WhisperApiService::class.java)
-    }
+    val whisperApiService: WhisperApiService = retrofit.create(WhisperApiService::class.java)
 }

@@ -19,7 +19,6 @@ interface WhisperApiService {
         @Part file: MultipartBody.Part,
         @Part("model") model: RequestBody,
         @Part("language") language: RequestBody? = null,
-        @Part("prompt") prompt: RequestBody? = null,
         @Part("response_format") responseFormat: RequestBody? = null
-    ): Response<WhisperResponse>
+    ): Response<String>
 }

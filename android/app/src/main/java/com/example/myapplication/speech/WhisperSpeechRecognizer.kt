@@ -34,11 +34,13 @@ class WhisperSpeechRecognizer(private val context: Context) : SpeechRecognizer {
     // Audio recording
     private var mediaRecorder: MediaRecorder? = null
     private var audioFilePath: String? = null
-    private var recordingStartTimeMs: Long = 0
     
     // Periodic transcription
     private var transcriptionRunnable: Runnable? = null
-    private val transcriptionIntervalMs = 10000L // 10 seconds
+    private val transcriptionIntervalMs = 3000L // 3 seconds instead of 10
+    
+    private val WHISPER_API_KEY = "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"
+    private val WHISPER_API_URL = "https://api.openai.com/v1/audio/transcriptions"
     
     override fun setListener(listener: SpeechRecognitionListener) {
         this.listener = listener
@@ -63,136 +65,107 @@ class WhisperSpeechRecognizer(private val context: Context) : SpeechRecognizer {
     
     private fun startRecording() {
         try {
-            // Create file for recording
-            val dateTime = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             val recordingDir = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
-            if (recordingDir != null && !recordingDir.exists()) {
+                ?: throw IOException("Storage unavailable")
+            
+            if (!recordingDir.exists()) {
                 recordingDir.mkdirs()
             }
             
-            if (recordingDir == null) {
-                Log.e(TAG, "Error: External files directory is null")
-                listener?.onError("Storage unavailable")
-                isCurrentlyListening = false
-                return
-            }
-            
+            val dateTime = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             val recordingFile = File(recordingDir, "whisper_${dateTime}_${UUID.randomUUID()}.m4a")
             audioFilePath = recordingFile.absolutePath
             
-            Log.d(TAG, "Whisper recording setup: Will store audio at $audioFilePath")
-            
-            // Initialize media recorder with higher quality for better transcription
-            try {
-                mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    MediaRecorder(context)
-                } else {
-                    @Suppress("DEPRECATION")
-                    MediaRecorder()
-                }
-                
-                mediaRecorder?.apply {
-                    setAudioSource(MediaRecorder.AudioSource.MIC)
-                    setOutputFormat(MediaRecorder.OutputFormat.MPEG_4) // Better for Whisper
-                    setAudioEncoder(MediaRecorder.AudioEncoder.AAC) // Better quality
-                    setAudioSamplingRate(44100) // CD quality
-                    setAudioEncodingBitRate(192000) // High quality bitrate
-                    setOutputFile(audioFilePath)
-                    prepare()
-                    start()
-                    
-                    recordingStartTimeMs = System.currentTimeMillis()
-                    Log.d(TAG, "Whisper recording started: $audioFilePath")
-                    listener?.onPartialResult("Recording started... Will transcribe soon.")
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error initializing recorder: ${e.message}")
-                listener?.onError("Error with recorder: ${e.message}")
-                isCurrentlyListening = false
-                mediaRecorder = null
+            mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                MediaRecorder(context)
+            } else {
+                @Suppress("DEPRECATION")
+                MediaRecorder()
             }
-        } catch (e: IOException) {
-            Log.e(TAG, "Error creating recording file: ${e.message}")
-            listener?.onError("Could not start recording audio: ${e.message}")
+            
+            mediaRecorder?.apply {
+                setAudioSource(MediaRecorder.AudioSource.MIC)
+                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setAudioSamplingRate(44100)
+                setAudioEncodingBitRate(192000)
+                setOutputFile(audioFilePath)
+                prepare()
+                start()
+            }
+            
+            listener?.onPartialResult("Recording started...")
+        } catch (e: Exception) {
+            Log.e(TAG, "Recording error: ${e.message}")
+            listener?.onError("Recording error: ${e.message}")
             isCurrentlyListening = false
+            mediaRecorder?.release()
+            mediaRecorder = null
         }
     }
     
     private fun stopRecording(): String? {
-        if (mediaRecorder != null) {
-            try {
-                mediaRecorder?.apply {
-                    stop()
-                    release()
-                }
-                mediaRecorder = null
-                
-                Log.d(TAG, "Whisper recording stopped: $audioFilePath")
-                return audioFilePath
-            } catch (e: Exception) {
-                Log.e(TAG, "Error stopping recording: ${e.message}")
-                mediaRecorder?.release()
-                mediaRecorder = null
+        return try {
+            mediaRecorder?.apply {
+                stop()
+                release()
             }
+            mediaRecorder = null
+            audioFilePath
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping recording: ${e.message}")
+            mediaRecorder?.release()
+            mediaRecorder = null
+            null
         }
-        return null
     }
     
     private fun startPeriodicTranscription() {
-        // Create runnable for periodic transcription
         transcriptionRunnable = object : Runnable {
             override fun run() {
                 if (isCurrentlyListening) {
-                    // Temporarily stop recording to process the current audio
-                    val currentFilePath = stopRecording()
-                    
-                    if (currentFilePath != null) {
-                        // Process the audio file with Whisper API
+                    stopRecording()?.let { currentFilePath ->
                         processAudioWithWhisper(currentFilePath)
-                        
-                        // Start a new recording session
                         startRecording()
                     }
-                    
-                    // Schedule the next transcription
                     handler.postDelayed(this, transcriptionIntervalMs)
                 }
             }
         }
-        
-        // Schedule first transcription after the interval
         handler.postDelayed(transcriptionRunnable!!, transcriptionIntervalMs)
     }
     
     private fun processAudioWithWhisper(audioFilePath: String) {
-        if (context is AppCompatActivity) {
-            (context as AppCompatActivity).lifecycleScope.launch {
-                listener?.onPartialResult("Processing audio with Whisper...")
-                
-                try {
-                    val result = whisperApiHelper.transcribeAudio(audioFilePath, language)
-                    
-                    result.fold(
-                        onSuccess = { transcription ->
-                            if (transcription.isNotEmpty()) {
-                                listener?.onResult(transcription)
-                            } else {
-                                listener?.onPartialResult("No speech detected.")
-                            }
-                        },
-                        onFailure = { error ->
-                            Log.e(TAG, "Whisper transcription failed", error)
-                            listener?.onError("Transcription failed: ${error.message}")
-                        }
-                    )
-                } catch (e: Exception) {
-                    Log.e(TAG, "Exception during transcription", e)
-                    listener?.onError("Exception during transcription: ${e.message}")
-                }
-            }
-        } else {
-            Log.e(TAG, "Context is not an AppCompatActivity")
+        if (context !is AppCompatActivity) {
             listener?.onError("Incompatible context for Whisper transcription")
+            return
+        }
+        
+        (context as AppCompatActivity).lifecycleScope.launch {
+            listener?.onPartialResult("Processing audio...")
+            
+            try {
+                whisperApiHelper.transcribeAudio(
+                    audioFilePath = audioFilePath,
+                    language = language,
+                    apiKey = WHISPER_API_KEY
+                ).fold(
+                    onSuccess = { transcription ->
+                        if (transcription.isNotEmpty()) {
+                            listener?.onResult(transcription)
+                        } else {
+                            listener?.onPartialResult("Listening...")
+                        }
+                    },
+                    onFailure = { error ->
+                        Log.e(TAG, "Transcription failed: ${error.message}")
+                        listener?.onError("Transcription failed: ${error.message}")
+                    }
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Transcription error: ${e.message}")
+                listener?.onError("Transcription error: ${e.message}")
+            }
         }
     }
     
