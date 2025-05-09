@@ -22,5 +22,5 @@ interface SpeechRecognitionListener {
     /**
      * Called when an error occurs during recognition
      */
-    fun onError(errorMessage: String)
+    fun onError(error: String)
 }

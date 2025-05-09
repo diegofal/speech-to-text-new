@@ -4,14 +4,15 @@ import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.vosk.Model
 import org.vosk.Recognizer
 import org.vosk.android.RecognitionListener
 import org.vosk.android.SpeechService
 import org.vosk.android.StorageService
+import java.io.File
 import java.io.IOException
 import java.util.Locale
 
@@ -33,6 +34,7 @@ class VoskSpeechRecognizer(private val context: Context) : SpeechRecognizer, Rec
     private var model: Model? = null
     private var recognizer: Recognizer? = null
     private var speechService: SpeechService? = null
+    private var isDestroyed = false
 
     /** true when SpeechService is active */
     private var isRunning = false
@@ -46,31 +48,60 @@ class VoskSpeechRecognizer(private val context: Context) : SpeechRecognizer, Rec
     }
 
     override fun startListening(language: String) {
+        if (isDestroyed) {
+            listener?.onError("Recognizer has been destroyed")
+            return
+        }
+
         // Map Android locale (en-US, es-ES, …) to model folder (en-us, es, …)
         val langPrefix = language.substring(0, 2).lowercase(Locale.getDefault())
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 initModelIfNeeded(langPrefix)
-                startRecognitionInternal()
+                withContext(Dispatchers.Main) {
+                    if (!isDestroyed) {
+                        startRecognitionInternal()
+                    }
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start recognizer", e)
-                listener?.onError("${e.message}")
+                withContext(Dispatchers.Main) {
+                    listener?.onError("Failed to start recognition: ${e.message}")
+                }
             }
         }
     }
 
     override fun stopListening() {
-        speechService?.stop()
-        isRunning = false
+        try {
+            speechService?.stop()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping speech service", e)
+        } finally {
+            isRunning = false
+        }
     }
 
     override fun isListening(): Boolean = isRunning
 
     override fun destroy() {
+        isDestroyed = true
         stopListening()
-        speechService?.shutdown()
-        recognizer?.close()
-        model?.close()
+        try {
+            speechService?.shutdown()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error shutting down speech service", e)
+        }
+        try {
+            recognizer?.close()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error closing recognizer", e)
+        }
+        try {
+            model?.close()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error closing model", e)
+        }
         speechService = null
         recognizer = null
         model = null
@@ -115,7 +146,15 @@ class VoskSpeechRecognizer(private val context: Context) : SpeechRecognizer, Rec
     /*--------------------------------------------------------------------------------------------*/
 
     private suspend fun initModelIfNeeded(langPrefix: String) {
-        if (model != null) return
+        if (model != null) {
+            Log.d(TAG, "Model already initialized")
+            return
+        }
+        if (isDestroyed) {
+            Log.d(TAG, "Recognizer is destroyed, skipping model initialization")
+            return
+        }
+
         listener?.onPartialResult("Loading offline model…")
         try {
             // Copy assets model directory to internal storage (blocking) the first time
@@ -124,41 +163,83 @@ class VoskSpeechRecognizer(private val context: Context) : SpeechRecognizer, Rec
                 "fr" -> "model-fr"
                 else -> "model-en-us" // default to English
             }
+
+            // List available assets
+            val assets = context.assets.list("") ?: emptyArray()
+            Log.d(TAG, "Available assets: ${assets.joinToString()}")
+
+            // Check if model exists in assets
+            if (!assets.contains(modelDirName)) {
+                throw IOException("Model directory '$modelDirName' not found in assets. Available assets: ${assets.joinToString()}")
+            }
+
+            // List model directory contents
+            val modelContents = context.assets.list(modelDirName) ?: emptyArray()
+            Log.d(TAG, "Model directory contents: ${modelContents.joinToString()}")
+
+            // Copy model to internal storage
             val modelPath = StorageService.sync(context, modelDirName, "models")
-            model = Model(modelPath)
-            Log.d(TAG, "Model loaded from $modelPath")
+            Log.d(TAG, "Model path after sync: $modelPath")
+
+            val modelFile = File(modelPath)
+            if (!modelFile.exists()) {
+                throw IOException("Failed to copy model to internal storage. Path '$modelPath' does not exist")
+            }
+
+            // Check model directory structure
+            val modelDirContents = modelFile.list() ?: emptyArray()
+            Log.d(TAG, "Model directory contents after sync: ${modelDirContents.joinToString()}")
+
+            // Initialize model
+            try {
+                model = Model(modelPath)
+                Log.d(TAG, "Model successfully loaded from $modelPath")
+            } catch (e: Exception) {
+                throw IOException("Failed to initialize Vosk model from path '$modelPath': ${e.message}")
+            }
         } catch (io: IOException) {
+            Log.e(TAG, "Failed to load Vosk model", io)
             throw IOException("Failed to load Vosk model: ${io.message}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Unexpected error loading model", e)
+            throw e
         }
     }
 
     private fun startRecognitionInternal() {
-        if (model == null) throw IllegalStateException("Model not initialised")
-        if (isRunning) return
+        if (isDestroyed) {
+            Log.d(TAG, "Recognizer is destroyed, skipping recognition start")
+            return
+        }
+        if (model == null) {
+            val error = "Model not initialized"
+            Log.e(TAG, error)
+            throw IllegalStateException(error)
+        }
+        if (isRunning) {
+            Log.d(TAG, "Recognition already running")
+            return
+        }
 
-        recognizer = Recognizer(model, 16000.0f)
-        speechService = SpeechService(recognizer, 16000.0f)
-        speechService?.startListening(this)
-        isRunning = true
-        listener?.onRecognitionStarted()
-        Log.d(TAG, "Offline recognizer started")
+        try {
+            recognizer = Recognizer(model, 16000.0f)
+            speechService = SpeechService(recognizer, 16000.0f)
+            speechService?.startListening(this)
+            isRunning = true
+            listener?.onRecognitionStarted()
+            Log.d(TAG, "Offline recognizer started")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start recognition", e)
+            throw e
+        }
     }
 
     private fun parseJsonText(json: String, key: String): String? {
         return try {
             JSONObject(json).optString(key)
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse Vosk JSON", e); null
-        }
-    }
-
-    /*--------------------------------------------------------------------------------------------*/
-    /*  Factory                                                                                   */
-    /*--------------------------------------------------------------------------------------------*/
-
-    companion object {
-        class Factory : SpeechRecognizer.Factory {
-            override fun create(context: Context): SpeechRecognizer = VoskSpeechRecognizer(context)
+            Log.w(TAG, "Failed to parse Vosk JSON", e)
+            null
         }
     }
 }

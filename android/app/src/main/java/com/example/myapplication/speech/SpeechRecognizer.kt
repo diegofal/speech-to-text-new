@@ -14,7 +14,7 @@ interface SpeechRecognizer {
     /**
      * Start speech recognition
      */
-    fun startListening(language: String)
+    fun startListening(language: String = "en-US")
     
     /**
      * Stop speech recognition
@@ -31,10 +31,13 @@ interface SpeechRecognizer {
      */
     fun destroy()
     
-    /**
-     * Factory interface for creating speech recognizers
-     */
-    interface Factory {
-        fun create(context: Context): SpeechRecognizer
+    companion object {
+        fun createVoskRecognizer(context: Context): SpeechRecognizer {
+            return VoskSpeechRecognizer(context)
+        }
+        
+        fun createWhisperRecognizer(context: Context): SpeechRecognizer {
+            return WhisperSpeechRecognizer(context)
+        }
     }
 }

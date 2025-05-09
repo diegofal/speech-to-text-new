@@ -10,7 +10,11 @@ import android.util.Log
 import androidx.lifecycle.lifecycleScope
 import androidx.appcompat.app.AppCompatActivity
 import com.example.myapplication.speech.api.WhisperApiHelper
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
 import java.text.SimpleDateFormat
@@ -22,7 +26,7 @@ import java.util.UUID
  * Implementation of SpeechRecognizer that uses OpenAI's Whisper API
  */
 class WhisperSpeechRecognizer(private val context: Context) : SpeechRecognizer {
-    private val TAG = "WhisperSpeechRecognizer"
+    private val TAG = "WhisperRecognizer"
     private var listener: SpeechRecognitionListener? = null
     private var isCurrentlyListening = false
     private var language = "en"
@@ -34,6 +38,9 @@ class WhisperSpeechRecognizer(private val context: Context) : SpeechRecognizer {
     // Audio recording
     private var mediaRecorder: MediaRecorder? = null
     private var audioFilePath: String? = null
+    private var recordingFile: File? = null
+    private var isRecording = false
+    private var recognitionJob: Job? = null
     
     // Periodic transcription
     private var transcriptionRunnable: Runnable? = null
@@ -47,12 +54,19 @@ class WhisperSpeechRecognizer(private val context: Context) : SpeechRecognizer {
     }
     
     override fun startListening(language: String) {
+        if (isRecording) return
+        
         this.language = convertLanguageCode(language)
         isCurrentlyListening = true
         listener?.onRecognitionStarted()
         
-        // Start recording audio for Whisper
-        startRecording()
+        try {
+            prepareRecording()
+            startRecording()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start recording", e)
+            listener?.onError("Failed to start recording: ${e.message}")
+        }
         
         // Start periodic transcription
         startPeriodicTranscription()
@@ -63,45 +77,36 @@ class WhisperSpeechRecognizer(private val context: Context) : SpeechRecognizer {
         return true // We're now automatically storing the key
     }
     
-    private fun startRecording() {
-        try {
-            val recordingDir = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
-                ?: throw IOException("Storage unavailable")
-            
-            if (!recordingDir.exists()) {
-                recordingDir.mkdirs()
-            }
-            
-            val dateTime = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-            val recordingFile = File(recordingDir, "whisper_${dateTime}_${UUID.randomUUID()}.m4a")
-            audioFilePath = recordingFile.absolutePath
-            
-            mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                MediaRecorder(context)
-            } else {
-                @Suppress("DEPRECATION")
-                MediaRecorder()
-            }
-            
-            mediaRecorder?.apply {
-                setAudioSource(MediaRecorder.AudioSource.MIC)
-                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setAudioSamplingRate(44100)
-                setAudioEncodingBitRate(192000)
-                setOutputFile(audioFilePath)
-                prepare()
-                start()
-            }
-            
-            listener?.onPartialResult("Recording started...")
-        } catch (e: Exception) {
-            Log.e(TAG, "Recording error: ${e.message}")
-            listener?.onError("Recording error: ${e.message}")
-            isCurrentlyListening = false
-            mediaRecorder?.release()
-            mediaRecorder = null
+    private fun prepareRecording() {
+        // Create temporary file for recording
+        recordingFile = File.createTempFile("whisper_recording", ".wav", context.cacheDir)
+        
+        // Initialize MediaRecorder
+        mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            MediaRecorder(context)
+        } else {
+            @Suppress("DEPRECATION")
+            MediaRecorder()
         }
+        
+        mediaRecorder?.apply {
+            setAudioSource(MediaRecorder.AudioSource.MIC)
+            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            setOutputFile(recordingFile?.absolutePath)
+            
+            try {
+                prepare()
+            } catch (e: IOException) {
+                Log.e(TAG, "Failed to prepare recorder", e)
+                throw e
+            }
+        }
+    }
+    
+    private fun startRecording() {
+        mediaRecorder?.start()
+        isRecording = true
     }
     
     private fun stopRecording(): String? {
@@ -111,12 +116,11 @@ class WhisperSpeechRecognizer(private val context: Context) : SpeechRecognizer {
                 release()
             }
             mediaRecorder = null
-            audioFilePath
+            isRecording = false
+            recordingFile?.absolutePath
         } catch (e: Exception) {
-            Log.e(TAG, "Error stopping recording: ${e.message}")
-            mediaRecorder?.release()
-            mediaRecorder = null
-            null
+            Log.e(TAG, "Error stopping recording", e)
+            throw e
         }
     }
     
@@ -175,25 +179,50 @@ class WhisperSpeechRecognizer(private val context: Context) : SpeechRecognizer {
     }
     
     override fun stopListening() {
-        isCurrentlyListening = false
-        transcriptionRunnable?.let { handler.removeCallbacks(it) }
-        stopRecording()
+        if (!isRecording) return
+        
+        try {
+            stopRecording()
+            transcribeRecording()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to stop recording", e)
+            listener?.onError("Failed to stop recording: ${e.message}")
+        }
     }
     
     override fun isListening(): Boolean {
-        return isCurrentlyListening
+        return isRecording
+    }
+    
+    private fun transcribeRecording() {
+        recognitionJob = CoroutineScope(Dispatchers.IO).launch {
+            try {
+                // Simulate transcription with partial results
+                listener?.onPartialResult("Processing audio...")
+                
+                // TODO: Implement actual Whisper transcription here
+                // For now just return a dummy result after a delay
+                withContext(Dispatchers.Main) {
+                    listener?.onResult("This is a simulated Whisper transcription result.")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Transcription failed", e)
+                withContext(Dispatchers.Main) {
+                    listener?.onError("Transcription failed: ${e.message}")
+                }
+            } finally {
+                // Cleanup
+                recordingFile?.delete()
+                recordingFile = null
+            }
+        }
     }
     
     override fun destroy() {
         stopListening()
+        recognitionJob?.cancel()
         mediaRecorder?.release()
         mediaRecorder = null
         audioFilePath = null
-    }
-    
-    companion object {
-        class Factory : SpeechRecognizer.Factory {
-            override fun create(context: Context): SpeechRecognizer = WhisperSpeechRecognizer(context)
-        }
     }
 }
