@@ -113,7 +113,7 @@ class VoiceWeb {
   stop() {
     if (this.recognition) {
       this.isContinuous = false;
-      this.recognition.stop();
+        this.recognition.stop();
     }
     return Promise.resolve();
   }
@@ -126,7 +126,7 @@ class VoiceWeb {
           this.recognition.start();
         } catch (error) {
           console.warn('Failed to restart recognition:', error);
-        }
+    }
       }, 100);
     }
   }
@@ -159,7 +159,7 @@ class VoiceWeb {
       this.isContinuous = false;
       this.recognition.stop();
       this.recognition = null;
-    }
+  }
   }
 }
 

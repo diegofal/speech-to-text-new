@@ -123,8 +123,22 @@ class ConversationAdapter(
         fun bind(conversation: Conversation) {
             titleTextView.text = conversation.title
             
-            val lastMessage = conversation.messages.lastOrNull()
-            lastMessageTextView.text = lastMessage?.text ?: "No messages"
+            // Create a summary of the conversation
+            val messages = conversation.messages.filter { !it.isPartial }
+            val summary = when {
+                messages.isEmpty() -> "No messages"
+                messages.size == 1 -> messages.first().text
+                else -> {
+                    val firstMessage = messages.first().text
+                    val lastMessage = messages.last().text
+                    if (firstMessage == lastMessage) {
+                        firstMessage
+                    } else {
+                        "${firstMessage.take(30)}...${lastMessage.takeLast(30)}"
+                    }
+                }
+            }
+            lastMessageTextView.text = summary
             
             val dateFormat = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
             timestampTextView.text = dateFormat.format(conversation.lastUpdated)

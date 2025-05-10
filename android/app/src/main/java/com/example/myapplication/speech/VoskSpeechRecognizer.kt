@@ -112,16 +112,32 @@ class VoskSpeechRecognizer(private val context: Context) : SpeechRecognizer, Rec
     /*--------------------------------------------------------------------------------------------*/
 
     override fun onPartialResult(hypothesis: String?) {
+        Log.d(TAG, "Received partial result: $hypothesis")
         if (!hypothesis.isNullOrEmpty()) {
             val text = parseJsonText(hypothesis, "partial")
-            if (!text.isNullOrEmpty()) listener?.onPartialResult(text)
+            if (!text.isNullOrEmpty()) {
+                Log.d(TAG, "Parsed partial result: $text")
+                listener?.onPartialResult(text)
+            } else {
+                Log.w(TAG, "Empty partial result after parsing")
+            }
+        } else {
+            Log.w(TAG, "Null or empty hypothesis received")
         }
     }
 
     override fun onResult(hypothesis: String?) {
+        Log.d(TAG, "Received final result: $hypothesis")
         if (!hypothesis.isNullOrEmpty()) {
             val text = parseJsonText(hypothesis, "text")
-            if (!text.isNullOrEmpty()) listener?.onResult(text)
+            if (text != null && text.isNotEmpty()) {
+                Log.d(TAG, "Parsed final result: $text")
+                listener?.onResult(text)
+            } else {
+                Log.w(TAG, "Empty final result after parsing")
+            }
+        } else {
+            Log.w(TAG, "Null or empty hypothesis received")
         }
     }
 
@@ -222,12 +238,15 @@ class VoskSpeechRecognizer(private val context: Context) : SpeechRecognizer, Rec
         }
 
         try {
+            Log.d(TAG, "Creating new recognizer")
             recognizer = Recognizer(model, 16000.0f)
+            Log.d(TAG, "Creating speech service")
             speechService = SpeechService(recognizer, 16000.0f)
+            Log.d(TAG, "Starting speech service")
             speechService?.startListening(this)
             isRunning = true
             listener?.onRecognitionStarted()
-            Log.d(TAG, "Offline recognizer started")
+            Log.d(TAG, "Offline recognizer started successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start recognition", e)
             throw e
@@ -236,9 +255,26 @@ class VoskSpeechRecognizer(private val context: Context) : SpeechRecognizer, Rec
 
     private fun parseJsonText(json: String, key: String): String? {
         return try {
-            JSONObject(json).optString(key)
+            Log.d(TAG, "Parsing JSON: $json")
+            val jsonObj = JSONObject(json)
+            when (key) {
+                "partial" -> {
+                    val partial = jsonObj.optString("partial")
+                    Log.d(TAG, "Extracted partial: $partial")
+                    if (partial.isNotEmpty()) partial else null
+                }
+                "text" -> {
+                    val text = jsonObj.optString("text")
+                    Log.d(TAG, "Extracted text: $text")
+                    if (text.isNotEmpty()) text else null
+                }
+                else -> {
+                    Log.w(TAG, "Unknown key: $key")
+                    null
+                }
+            }
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse Vosk JSON", e)
+            Log.w(TAG, "Failed to parse Vosk JSON: $json", e)
             null
         }
     }

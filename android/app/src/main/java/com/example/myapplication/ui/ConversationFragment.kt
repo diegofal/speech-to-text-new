@@ -31,6 +31,7 @@ class ConversationFragment : Fragment(), SpeechRecognitionListener {
     private var currentRecognizer: SpeechRecognizer? = null
     private var isListening = false
     private var lastPartialResult: String = ""
+    private var currentMessage: Message? = null
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -44,6 +45,7 @@ class ConversationFragment : Fragment(), SpeechRecognitionListener {
         super.onViewCreated(view, savedInstanceState)
 
         conversation = arguments?.getParcelable(ARG_CONVERSATION, Conversation::class.java) ?: return
+        android.util.Log.d("ConversationFragment", "onViewCreated: conversation from args = $conversation")
         conversationManager = ConversationManager(requireContext())
 
         setupViews(view)
@@ -85,6 +87,8 @@ class ConversationFragment : Fragment(), SpeechRecognitionListener {
                     currentRecognizer?.setListener(this)
                 } catch (e: Exception) {
                     e.printStackTrace()
+                    messagesTextView.append("\n\n❌ Error: ${e.message}")
+                    scrollToBottom()
                 }
             }
         }
@@ -101,20 +105,22 @@ class ConversationFragment : Fragment(), SpeechRecognitionListener {
     }
 
     private fun loadMessages() {
+        // Always fetch the latest conversation from storage
+        val updatedConversation = conversationManager.getConversations().find { it.id == conversation.id }
+        if (updatedConversation != null) {
+            conversation = updatedConversation
+        }
         val messages = conversation.messages
+        android.util.Log.d("ConversationFragment", "loadMessages: messages=$messages")
         if (messages.isEmpty()) {
             messagesTextView.text = ""
             return
         }
 
         val dateFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-        val formattedMessages = messages.joinToString("\n\n") { message ->
+        val formattedMessages = messages.joinToString("\n") { message ->
             val time = dateFormat.format(message.timestamp)
-            if (message.isPartial) {
-                "_$time: ${message.text}"
-            } else {
-                "$time: ${message.text}"
-            }
+            "$time: ${message.text}"
         }
 
         messagesTextView.text = formattedMessages
@@ -164,28 +170,56 @@ class ConversationFragment : Fragment(), SpeechRecognitionListener {
 
     // SpeechRecognitionListener implementation
     override fun onRecognitionStarted() {
-        // Do nothing
+        // Clear any previous partial results
+        lastPartialResult = ""
+        currentMessage = null
+        messagesTextView.append("\n\nStarting recognition...")
+        scrollToBottom()
     }
 
     override fun onPartialResult(text: String) {
+        android.util.Log.d("ConversationFragment", "onPartialResult: $text, thread: ${Thread.currentThread().name}")
         if (text == lastPartialResult) return
-        
         lastPartialResult = text
-        val message = Message(text = text, isPartial = true)
-        conversationManager.updatePartialMessage(conversation.id, message)
-        loadMessages()
-    }
-
-    override fun onResult(text: String) {
-        if (text.isNotEmpty()) {
-            val message = Message(text = text)
-            conversationManager.addMessage(conversation.id, message)
+        
+        // Update or create the current message
+        if (currentMessage == null) {
+            currentMessage = Message(text = text, isPartial = true)
+            conversationManager.addMessage(conversation.id, currentMessage!!)
+        } else {
+            currentMessage = currentMessage!!.copy(text = text)
+            conversationManager.updatePartialMessage(conversation.id, currentMessage!!)
+        }
+        
+        requireActivity().runOnUiThread {
             loadMessages()
         }
     }
 
+    override fun onResult(text: String) {
+        android.util.Log.d("ConversationFragment", "onResult: $text, thread: ${Thread.currentThread().name}")
+        if (text.isNotEmpty()) {
+            // Finalize the current message
+            currentMessage = null
+            lastPartialResult = ""
+            requireActivity().runOnUiThread {
+                loadMessages()
+            }
+        }
+    }
+
     override fun onError(error: String) {
-        // Show error in UI
+        android.util.Log.d("ConversationFragment", "onError: $error, thread: "+Thread.currentThread().name)
+        requireActivity().runOnUiThread {
+            messagesTextView.append("\n\n❌ Error: $error")
+            scrollToBottom()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        android.util.Log.d("ConversationFragment", "onResume: Fragment is active")
+        loadMessages() // Force UI refresh when fragment becomes visible
     }
 
     companion object {

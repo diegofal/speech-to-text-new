@@ -17,16 +17,16 @@ const TranscriptionButton = ({ isListening, onStartListening, onStopListening, i
           Stop Transcribing
         </Button>
       ) : (
-        <Button
-          mode="contained"
+      <Button
+        mode="contained"
           icon="microphone"
           onPress={onStartListening}
           style={[styles.button, styles.startButton]}
-          labelStyle={styles.buttonLabel}
+        labelStyle={styles.buttonLabel}
           disabled={!isEnabled}
-        >
+      >
           Start Transcribing
-        </Button>
+      </Button>
       )}
     </View>
   );

@@ -21,8 +21,7 @@
     <ScrollView
         android:id="@+id/scrollView"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
+        android:layout_height="match_parent"
         android:clipToPadding="false"
         android:fillViewport="true"
         android:padding="16dp"
@@ -33,7 +32,10 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textAppearance="@style/TextAppearance.MaterialComponents.Body1"
-            android:textColor="@color/black" />
+            android:textColor="@color/black"
+            android:lineSpacingExtra="4dp"
+            android:autoLink="web"
+            android:linksClickable="true" />
 
     </ScrollView>
 
