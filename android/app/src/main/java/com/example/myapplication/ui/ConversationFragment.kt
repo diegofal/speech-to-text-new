@@ -4,6 +4,8 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
@@ -17,13 +19,14 @@ import com.example.myapplication.storage.ConversationManager
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
 
 class ConversationFragment : Fragment(), SpeechRecognitionListener {
     private lateinit var conversation: Conversation
     private lateinit var conversationManager: ConversationManager
-    private lateinit var messagesTextView: TextView
+    private lateinit var messagesContainer: LinearLayout
     private lateinit var scrollView: ScrollView
     private lateinit var recognizerToggleGroup: MaterialButtonToggleGroup
     private lateinit var btnStartStop: MaterialButton
@@ -32,6 +35,8 @@ class ConversationFragment : Fragment(), SpeechRecognitionListener {
     private var isListening = false
     private var lastPartialResult: String = ""
     private var currentMessage: Message? = null
+    private var audioPlayer: AudioPlayer? = null
+    private var currentlyPlayingView: View? = null
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -47,6 +52,7 @@ class ConversationFragment : Fragment(), SpeechRecognitionListener {
         conversation = arguments?.getParcelable(ARG_CONVERSATION, Conversation::class.java) ?: return
         android.util.Log.d("ConversationFragment", "onViewCreated: conversation from args = $conversation")
         conversationManager = ConversationManager(requireContext())
+        audioPlayer = AudioPlayer(requireContext())
 
         setupViews(view)
         loadMessages()
@@ -61,6 +67,12 @@ class ConversationFragment : Fragment(), SpeechRecognitionListener {
         )
     }
 
+    override fun onDestroyView() {
+        super.onDestroyView()
+        audioPlayer?.stop()
+        audioPlayer = null
+    }
+
     private fun setupViews(view: View) {
         view.findViewById<MaterialToolbar>(R.id.toolbar).apply {
             title = conversation.title
@@ -69,7 +81,7 @@ class ConversationFragment : Fragment(), SpeechRecognitionListener {
             }
         }
 
-        messagesTextView = view.findViewById(R.id.tvMessages)
+        messagesContainer = view.findViewById(R.id.messagesContainer)
         scrollView = view.findViewById(R.id.scrollView)
         recognizerToggleGroup = view.findViewById(R.id.recognizerToggleGroup)
         btnStartStop = view.findViewById(R.id.btnStartStop)
@@ -87,8 +99,7 @@ class ConversationFragment : Fragment(), SpeechRecognitionListener {
                     currentRecognizer?.setListener(this)
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    messagesTextView.append("\n\n❌ Error: ${e.message}")
-                    scrollToBottom()
+                    addMessage("❌ Error: ${e.message}")
                 }
             }
         }
@@ -113,18 +124,58 @@ class ConversationFragment : Fragment(), SpeechRecognitionListener {
         val messages = conversation.messages
         android.util.Log.d("ConversationFragment", "loadMessages: messages=$messages")
         if (messages.isEmpty()) {
-            messagesTextView.text = ""
+            messagesContainer.removeAllViews()
             return
         }
 
+        messagesContainer.removeAllViews()
         val dateFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-        val formattedMessages = messages.joinToString("\n") { message ->
+        
+        messages.forEach { message ->
+            val messageView = layoutInflater.inflate(R.layout.item_message, messagesContainer, false)
+            val messageTextView = messageView.findViewById<TextView>(R.id.tvMessage)
+            val playButton = messageView.findViewById<ImageButton>(R.id.btnPlay)
+            
             val time = dateFormat.format(message.timestamp)
-            "$time: ${message.text}"
+            messageTextView.text = "$time: ${message.text}"
+            
+            // Handle audio playback
+            if (message.audioFilePath != null) {
+                playButton.visibility = View.VISIBLE
+                playButton.setOnClickListener {
+                    if (currentlyPlayingView == messageView) {
+                        audioPlayer?.stop()
+                        currentlyPlayingView = null
+                        playButton.setImageResource(R.drawable.ic_play)
+                    } else {
+                        // Stop any currently playing audio
+                        currentlyPlayingView?.findViewById<ImageButton>(R.id.btnPlay)?.setImageResource(R.drawable.ic_play)
+                        
+                        val audioFile = File(message.audioFilePath)
+                        if (audioFile.exists()) {
+                            audioPlayer?.play(audioFile) {
+                                currentlyPlayingView = null
+                                playButton.setImageResource(R.drawable.ic_play)
+                            }
+                            currentlyPlayingView = messageView
+                            playButton.setImageResource(R.drawable.ic_pause)
+                        }
+                    }
+                }
+            } else {
+                playButton.visibility = View.GONE
+            }
+            
+            messagesContainer.addView(messageView)
         }
-
-        messagesTextView.text = formattedMessages
+        
         scrollToBottom()
+    }
+
+    private fun addMessage(text: String) {
+        val message = Message(text = text)
+        conversationManager.addMessage(conversation.id, message)
+        loadMessages()
     }
 
     private fun startListening() {
@@ -173,7 +224,7 @@ class ConversationFragment : Fragment(), SpeechRecognitionListener {
         // Clear any previous partial results
         lastPartialResult = ""
         currentMessage = null
-        messagesTextView.append("\n\nStarting recognition...")
+        addMessage("Starting recognition...")
         scrollToBottom()
     }
 
@@ -196,22 +247,37 @@ class ConversationFragment : Fragment(), SpeechRecognitionListener {
         }
     }
 
-    override fun onResult(text: String) {
-        android.util.Log.d("ConversationFragment", "onResult: $text, thread: ${Thread.currentThread().name}")
-        if (text.isNotEmpty()) {
-            // Finalize the current message
-            currentMessage = null
-            lastPartialResult = ""
-            requireActivity().runOnUiThread {
-                loadMessages()
+    override fun onResult(text: String, audioFilePath: String?) {
+        android.util.Log.d("ConversationFragment", "onResult: $text, audioFilePath: $audioFilePath")
+        requireActivity().runOnUiThread {
+            if (currentMessage != null) {
+                // Update the existing message
+                currentMessage = currentMessage?.copy(
+                    text = text,
+                    isPartial = false,
+                    audioFilePath = audioFilePath
+                )
+                currentMessage?.let { message ->
+                    conversationManager.updatePartialMessage(conversation.id, message)
+                }
+            } else {
+                // Create a new message
+                currentMessage = Message(
+                    text = text,
+                    audioFilePath = audioFilePath
+                )
+                currentMessage?.let { message ->
+                    conversationManager.addMessage(conversation.id, message)
+                }
             }
+            loadMessages()
         }
     }
 
     override fun onError(error: String) {
         android.util.Log.d("ConversationFragment", "onError: $error, thread: "+Thread.currentThread().name)
         requireActivity().runOnUiThread {
-            messagesTextView.append("\n\n❌ Error: $error")
+            addMessage("❌ Error: $error")
             scrollToBottom()
         }
     }

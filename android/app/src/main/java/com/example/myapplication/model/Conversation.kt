@@ -8,18 +8,21 @@ import java.util.UUID
 data class Message(
     val text: String,
     val timestamp: Date = Date(),
-    val isPartial: Boolean = false
+    val isPartial: Boolean = false,
+    val audioFilePath: String? = null
 ) : Parcelable {
     constructor(parcel: Parcel) : this(
         parcel.readString() ?: "",
         Date(parcel.readLong()),
-        parcel.readByte() != 0.toByte()
+        parcel.readByte() != 0.toByte(),
+        parcel.readString()
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
         parcel.writeString(text)
         parcel.writeLong(timestamp.time)
         parcel.writeByte(if (isPartial) 1 else 0)
+        parcel.writeString(audioFilePath)
     }
 
     override fun describeContents(): Int {

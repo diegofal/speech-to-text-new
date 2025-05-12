@@ -17,6 +17,7 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.io.File
 
 class ConversationListFragment : Fragment() {
     private lateinit var conversationManager: ConversationManager
@@ -96,6 +97,8 @@ class ConversationAdapter(
 ) : RecyclerView.Adapter<ConversationAdapter.ViewHolder>() {
 
     private var conversations: List<Conversation> = emptyList()
+    private var audioPlayer: AudioPlayer? = null
+    private var currentlyPlayingPosition: Int = -1
 
     fun updateConversations(newConversations: List<Conversation>) {
         conversations = newConversations.sortedByDescending { it.lastUpdated }
@@ -105,12 +108,13 @@ class ConversationAdapter(
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val view = LayoutInflater.from(parent.context)
             .inflate(R.layout.item_conversation, parent, false)
+        audioPlayer = AudioPlayer(parent.context)
         return ViewHolder(view)
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val conversation = conversations[position]
-        holder.bind(conversation)
+        holder.bind(conversation, position)
     }
 
     override fun getItemCount(): Int = conversations.size
@@ -119,8 +123,9 @@ class ConversationAdapter(
         private val titleTextView: TextView = itemView.findViewById(R.id.tvTitle)
         private val lastMessageTextView: TextView = itemView.findViewById(R.id.tvLastMessage)
         private val timestampTextView: TextView = itemView.findViewById(R.id.tvTimestamp)
+        private val playButton: ImageButton = itemView.findViewById(R.id.btnPlay)
 
-        fun bind(conversation: Conversation) {
+        fun bind(conversation: Conversation, position: Int) {
             titleTextView.text = conversation.title
             
             // Create a summary of the conversation
@@ -142,6 +147,37 @@ class ConversationAdapter(
             
             val dateFormat = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
             timestampTextView.text = dateFormat.format(conversation.lastUpdated)
+
+            // Handle audio playback
+            val hasAudio = messages.any { it.audioFilePath != null }
+            playButton.visibility = if (hasAudio) View.VISIBLE else View.GONE
+            
+            playButton.setOnClickListener {
+                if (currentlyPlayingPosition == position) {
+                    audioPlayer?.stop()
+                    currentlyPlayingPosition = -1
+                    playButton.setImageResource(R.drawable.ic_play)
+                } else {
+                    // Stop any currently playing audio
+                    if (currentlyPlayingPosition != -1) {
+                        notifyItemChanged(currentlyPlayingPosition)
+                    }
+                    
+                    // Find the first message with audio
+                    val messageWithAudio = messages.firstOrNull { it.audioFilePath != null }
+                    messageWithAudio?.audioFilePath?.let { audioPath ->
+                        val audioFile = File(audioPath)
+                        if (audioFile.exists()) {
+                            audioPlayer?.play(audioFile) {
+                                currentlyPlayingPosition = -1
+                                playButton.setImageResource(R.drawable.ic_play)
+                            }
+                            currentlyPlayingPosition = position
+                            playButton.setImageResource(R.drawable.ic_pause)
+                        }
+                    }
+                }
+            }
 
             itemView.setOnClickListener { onItemClick(conversation) }
             itemView.setOnLongClickListener {

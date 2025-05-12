@@ -27,15 +27,11 @@
         android:padding="16dp"
         app:layout_behavior="@string/appbar_scrolling_view_behavior">
 
-        <TextView
-            android:id="@+id/tvMessages"
+        <LinearLayout
+            android:id="@+id/messagesContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textAppearance="@style/TextAppearance.MaterialComponents.Body1"
-            android:textColor="@color/black"
-            android:lineSpacingExtra="4dp"
-            android:autoLink="web"
-            android:linksClickable="true" />
+            android:orientation="vertical" />
 
     </ScrollView>
 
@@ -57,7 +53,6 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnVosk"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
@@ -65,7 +60,6 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnWhisper"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
@@ -77,9 +71,7 @@
             android:id="@+id/btnStartStop"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Start Listening"
-            app:icon="@drawable/ic_mic"
-            app:iconGravity="textStart" />
+            android:text="Start Recording" />
 
     </LinearLayout>
 

@@ -10,6 +10,11 @@ interface SpeechRecognitionListener {
     fun onRecognitionStarted()
     
     /**
+     * Called when speech recognition has ended
+     */
+    fun onRecognitionEnded()
+    
+    /**
      * Called when partial results are available during recognition
      */
     fun onPartialResult(text: String)
@@ -17,7 +22,7 @@ interface SpeechRecognitionListener {
     /**
      * Called when final results are available after recognition
      */
-    fun onResult(text: String)
+    fun onResult(text: String, audioFilePath: String? = null)
     
     /**
      * Called when an error occurs during recognition

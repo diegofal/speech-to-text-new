@@ -200,10 +200,13 @@ class WhisperSpeechRecognizer(private val context: Context) : SpeechRecognizer {
                 // Simulate transcription with partial results
                 listener?.onPartialResult("Processing audio...")
                 
+                // Get the audio file path
+                val audioFilePath = recordingFile?.absolutePath
+                
                 // TODO: Implement actual Whisper transcription here
                 // For now just return a dummy result after a delay
                 withContext(Dispatchers.Main) {
-                    listener?.onResult("This is a simulated Whisper transcription result.")
+                    listener?.onResult("This is a simulated Whisper transcription result.", audioFilePath)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Transcription failed", e)
@@ -211,9 +214,8 @@ class WhisperSpeechRecognizer(private val context: Context) : SpeechRecognizer {
                     listener?.onError("Transcription failed: ${e.message}")
                 }
             } finally {
-                // Cleanup
-                recordingFile?.delete()
-                recordingFile = null
+                isCurrentlyListening = false
+                listener?.onRecognitionEnded()
             }
         }
     }
