@@ -42,6 +42,15 @@ class WhisperSpeechRecognizer(private val context: Context) : SpeechRecognizer {
     private var isRecording = false
     private var recognitionJob: Job? = null
     
+    // Audio storage directory
+    private val audioStorageDir: File by lazy {
+        val dir = File(context.getExternalFilesDir(null), "audio_recordings")
+        if (!dir.exists()) {
+            dir.mkdirs()
+        }
+        dir
+    }
+    
     // Periodic transcription
     private var transcriptionRunnable: Runnable? = null
     private val transcriptionIntervalMs = 3000L // 3 seconds instead of 10
@@ -78,8 +87,12 @@ class WhisperSpeechRecognizer(private val context: Context) : SpeechRecognizer {
     }
     
     private fun prepareRecording() {
-        // Create temporary file for recording
-        recordingFile = File.createTempFile("whisper_recording", ".wav", context.cacheDir)
+        // Create file with timestamp in the audio storage directory
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val fileName = "recording_$timestamp.m4a"
+        recordingFile = File(audioStorageDir, fileName)
+        
+        Log.d(TAG, "Preparing recording at: ${recordingFile?.absolutePath}")
         
         // Initialize MediaRecorder
         mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -111,13 +124,32 @@ class WhisperSpeechRecognizer(private val context: Context) : SpeechRecognizer {
     
     private fun stopRecording(): String? {
         return try {
+            if (!isRecording) {
+                Log.d(TAG, "Not recording, nothing to stop")
+                return null
+            }
+            
+            Log.d(TAG, "Stopping recording...")
             mediaRecorder?.apply {
                 stop()
                 release()
             }
             mediaRecorder = null
             isRecording = false
-            recordingFile?.absolutePath
+            
+            val filePath = recordingFile?.absolutePath
+            if (filePath != null) {
+                val file = File(filePath)
+                if (file.exists() && file.length() > 0) {
+                    Log.d(TAG, "Recording stopped successfully. File saved at: $filePath, size: ${file.length()} bytes")
+                } else {
+                    Log.e(TAG, "Recording stopped but file is missing or empty: $filePath")
+                }
+            } else {
+                Log.e(TAG, "Recording stopped but no file path available")
+            }
+            
+            filePath
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping recording", e)
             throw e
@@ -145,6 +177,8 @@ class WhisperSpeechRecognizer(private val context: Context) : SpeechRecognizer {
             return
         }
         
+        Log.d(TAG, "Processing audio file: $audioFilePath")
+        
         (context as AppCompatActivity).lifecycleScope.launch {
             listener?.onPartialResult("Processing audio...")
             
@@ -156,7 +190,8 @@ class WhisperSpeechRecognizer(private val context: Context) : SpeechRecognizer {
                 ).fold(
                     onSuccess = { transcription ->
                         if (transcription.isNotEmpty()) {
-                            listener?.onResult(transcription)
+                            Log.d(TAG, "Transcription successful, passing audio file path: $audioFilePath")
+                            listener?.onResult(transcription, audioFilePath)
                         } else {
                             listener?.onPartialResult("Listening...")
                         }
@@ -202,11 +237,33 @@ class WhisperSpeechRecognizer(private val context: Context) : SpeechRecognizer {
                 
                 // Get the audio file path
                 val audioFilePath = recordingFile?.absolutePath
+                Log.d(TAG, "Transcribing recording, audio file path: $audioFilePath")
                 
-                // TODO: Implement actual Whisper transcription here
-                // For now just return a dummy result after a delay
-                withContext(Dispatchers.Main) {
-                    listener?.onResult("This is a simulated Whisper transcription result.", audioFilePath)
+                if (audioFilePath != null) {
+                    // Process with Whisper API
+                    whisperApiHelper.transcribeAudio(
+                        audioFilePath = audioFilePath,
+                        language = language,
+                        apiKey = WHISPER_API_KEY
+                    ).fold(
+                        onSuccess = { transcription ->
+                            withContext(Dispatchers.Main) {
+                                Log.d(TAG, "Transcription successful, passing audio file path: $audioFilePath")
+                                listener?.onResult(transcription, audioFilePath)
+                            }
+                        },
+                        onFailure = { error ->
+                            Log.e(TAG, "Transcription failed: ${error.message}")
+                            withContext(Dispatchers.Main) {
+                                listener?.onError("Transcription failed: ${error.message}")
+                            }
+                        }
+                    )
+                } else {
+                    Log.e(TAG, "No audio file path available")
+                    withContext(Dispatchers.Main) {
+                        listener?.onError("No audio file available")
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Transcription failed", e)
@@ -226,5 +283,22 @@ class WhisperSpeechRecognizer(private val context: Context) : SpeechRecognizer {
         mediaRecorder?.release()
         mediaRecorder = null
         audioFilePath = null
+    }
+    
+    /**
+     * Verifies that an audio file exists and is accessible
+     */
+    fun verifyAudioFile(filePath: String): Boolean {
+        val file = File(filePath)
+        val exists = file.exists()
+        val readable = file.canRead()
+        val size = file.length()
+        
+        Log.d(TAG, "Verifying audio file: $filePath")
+        Log.d(TAG, "File exists: $exists")
+        Log.d(TAG, "File is readable: $readable")
+        Log.d(TAG, "File size: $size bytes")
+        
+        return exists && readable && size > 0
     }
 }

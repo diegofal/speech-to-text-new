@@ -1,6 +1,7 @@
 package com.example.myapplication.ui
 
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -11,6 +12,7 @@ import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.fragment.app.Fragment
 import com.example.myapplication.R
+import com.example.myapplication.audio.AudioPlayer
 import com.example.myapplication.model.Conversation
 import com.example.myapplication.model.Message
 import com.example.myapplication.speech.SpeechRecognitionListener
@@ -141,18 +143,18 @@ class ConversationFragment : Fragment(), SpeechRecognitionListener {
             
             // Handle audio playback
             if (message.audioFilePath != null) {
-                playButton.visibility = View.VISIBLE
-                playButton.setOnClickListener {
-                    if (currentlyPlayingView == messageView) {
-                        audioPlayer?.stop()
-                        currentlyPlayingView = null
-                        playButton.setImageResource(R.drawable.ic_play)
-                    } else {
-                        // Stop any currently playing audio
-                        currentlyPlayingView?.findViewById<ImageButton>(R.id.btnPlay)?.setImageResource(R.drawable.ic_play)
-                        
-                        val audioFile = File(message.audioFilePath)
-                        if (audioFile.exists()) {
+                val audioFile = File(message.audioFilePath)
+                if (audioFile.exists() && audioFile.canRead() && audioFile.length() > 0) {
+                    playButton.visibility = View.VISIBLE
+                    playButton.setOnClickListener {
+                        if (currentlyPlayingView == messageView) {
+                            audioPlayer?.stop()
+                            currentlyPlayingView = null
+                            playButton.setImageResource(R.drawable.ic_play)
+                        } else {
+                            // Stop any currently playing audio
+                            currentlyPlayingView?.findViewById<ImageButton>(R.id.btnPlay)?.setImageResource(R.drawable.ic_play)
+                            
                             audioPlayer?.play(audioFile) {
                                 currentlyPlayingView = null
                                 playButton.setImageResource(R.drawable.ic_play)
@@ -161,6 +163,9 @@ class ConversationFragment : Fragment(), SpeechRecognitionListener {
                             playButton.setImageResource(R.drawable.ic_pause)
                         }
                     }
+                } else {
+                    Log.e("ConversationFragment", "Audio file not accessible: ${message.audioFilePath}")
+                    playButton.visibility = View.GONE
                 }
             } else {
                 playButton.visibility = View.GONE
@@ -258,6 +263,7 @@ class ConversationFragment : Fragment(), SpeechRecognitionListener {
                     audioFilePath = audioFilePath
                 )
                 currentMessage?.let { message ->
+                    Log.d("ConversationFragment", "Updating message with audio file: ${message.audioFilePath}")
                     conversationManager.updatePartialMessage(conversation.id, message)
                 }
             } else {
@@ -267,6 +273,7 @@ class ConversationFragment : Fragment(), SpeechRecognitionListener {
                     audioFilePath = audioFilePath
                 )
                 currentMessage?.let { message ->
+                    Log.d("ConversationFragment", "Creating new message with audio file: ${message.audioFilePath}")
                     conversationManager.addMessage(conversation.id, message)
                 }
             }
@@ -286,6 +293,44 @@ class ConversationFragment : Fragment(), SpeechRecognitionListener {
         super.onResume()
         android.util.Log.d("ConversationFragment", "onResume: Fragment is active")
         loadMessages() // Force UI refresh when fragment becomes visible
+    }
+
+    override fun onRecognitionEnded() {
+        android.util.Log.d("ConversationFragment", "onRecognitionEnded")
+        requireActivity().runOnUiThread {
+            isListening = false
+            updateUI()
+            
+            // Show audio file location if available
+            Log.d("ConversationFragment", "Checking for audio file in current message: ${currentMessage?.audioFilePath}")
+            currentMessage?.audioFilePath?.let { filePath ->
+                Log.d("ConversationFragment", "Found audio file path, showing popup: $filePath")
+                showAudioFileLocation(filePath)
+            } ?: Log.d("ConversationFragment", "No audio file path found in current message")
+        }
+    }
+
+    private fun showAudioFileLocation(filePath: String) {
+        val file = File(filePath)
+        Log.d("ConversationFragment", "Showing audio file location dialog for: $filePath")
+        Log.d("ConversationFragment", "File exists: ${file.exists()}, Size: ${file.length()}")
+        
+        val message = if (file.exists()) {
+            "Audio file saved at:\n$filePath\n\nFile size: ${file.length() / 1024} KB"
+        } else {
+            "Audio file not found at:\n$filePath"
+        }
+        
+        try {
+            androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                .setTitle("Audio File Location")
+                .setMessage(message)
+                .setPositiveButton("OK", null)
+                .show()
+            Log.d("ConversationFragment", "Successfully showed audio file location dialog")
+        } catch (e: Exception) {
+            Log.e("ConversationFragment", "Error showing audio file location dialog", e)
+        }
     }
 
     companion object {
